@@ -1,4 +1,4 @@
-local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+local OrionLib = loadstring(game:HttpGet(("https://raw.githubusercontent.com/jensonhirst/Orion/refs/heads/main/source")))();
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -395,8 +395,10 @@ RunService.RenderStepped:Connect(function()
         end
     else
         -- Remove any existing ESP Boxes and Text when Toggle is off
-        for _, drawing in ipairs(Drawing.GetObjects()) do
-            drawing:Remove()
+        if Drawing and Drawing.GetObjects then
+            for _, drawing in ipairs(Drawing.GetObjects()) do
+                drawing:Remove()
+            end
         end
     end
 end)
