@@ -388,6 +388,30 @@ local TeamCheckESP = ESPTab:AddToggle({
     end
 })
 
+ESPTab:AddSlider({
+    Name = "ESP Update Interval",
+    Min = 0.01,
+    Max = 0.1,
+    Default = 0.03,
+    Increment = 0.01,
+    ValueName = "seconds",
+    Callback = function(Value)
+        UPDATE_INTERVAL = Value
+    end
+})
+
+ESPTab:AddSlider({
+    Name = "Max ESP Distance",
+    Min = 50,
+    Max = 1000,
+    Default = 500,
+    Increment = 50,
+    ValueName = "studs",
+    Callback = function(Value)
+        ESP_MAX_DISTANCE = Value
+    end
+})
+
 -- Notification
 game.StarterGui:SetCore("SendNotification", {
     Title = "Made By OWGAG",
@@ -686,30 +710,6 @@ SettingsTab:AddButton({
         for i = 1, 5 do
             game:GetService("RunService").RenderStepped:Wait()
         end
-    end
-})
--- Add these to your Settings tab
-SettingsTab:AddSlider({
-    Name = "ESP Update Interval",
-    Min = 0.01,
-    Max = 0.1,
-    Default = 0.03,
-    Increment = 0.01,
-    ValueName = "seconds",
-    Callback = function(Value)
-        UPDATE_INTERVAL = Value
-    end
-})
-
-SettingsTab:AddSlider({
-    Name = "Max ESP Distance",
-    Min = 50,
-    Max = 1000,
-    Default = 500,
-    Increment = 50,
-    ValueName = "studs",
-    Callback = function(Value)
-        ESP_MAX_DISTANCE = Value
     end
 })
 
