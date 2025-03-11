@@ -1,0 +1,868 @@
+--with anti aim Invisible
+
+local OrionLib = loadstring(game:HttpGet(("https://raw.githubusercontent.com/jensonhirst/Orion/refs/heads/main/source")))();
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local camera = workspace.CurrentCamera
+local connections = {}
+local drawingCache = {
+    boxes = {},
+    texts = {}
+}
+local Vector2New = Vector2.new
+local Color3New = Color3.from
+local lastUpdate = 0
+local UPDATE_INTERVAL = 0.03 -- 30fps throttle for expensive operations
+local cachedPositions = {}
+
+-- Cache frequently used values
+local viewportSize = camera.ViewportSize
+local screenCenter = Vector2New(viewportSize.X / 2, viewportSize.Y / 2)
+
+-- Add this function for position caching
+local function cacheCharacterPositions()
+    table.clear(cachedPositions)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+            if humanoidRootPart then
+                local pos, onScreen = camera:WorldToViewportPoint(humanoidRootPart.Position)
+                if onScreen then
+                    cachedPositions[player] = {
+                        position = pos,
+                        onScreen = true
+                    }
+                end
+            end
+        end
+    end
+end
+
+local Window = OrionLib:MakeWindow({
+    Name = "KUPAL Aimlock and ESP",
+    HidePremium = false,
+    SaveConfig = true,
+    ConfigFolder = "OrionAimlockConfig"
+})
+
+-- Aimlock Tab
+local AimlockTab = Window:MakeTab({
+    Name = "Aimlock",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Anti-Aimbot Tab
+local AntiAimTab = Window:MakeTab({
+    Name = "Anti-Aim",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- ESP Tab
+local ESPTab = Window:MakeTab({
+    Name = "ESP",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Add new Whitelist Tab
+local WhitelistTab = Window:MakeTab({
+    Name = "Whitelist",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Settings Tab
+local SettingsTab = Window:MakeTab({
+    Name = "Settings",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Anti-aimbot variables
+local isAntiAimbotEnabled = false
+local antiAimbotMode = "Random" -- Random, Spin, Glitch
+local antiAimbotSpeed = 50
+local lastAntiAimUpdate = 0
+local ANTI_AIM_INTERVAL = 0.01
+local spinAngle = 0
+local isHeadInvisible = false
+local originalHeadTransparency = 0
+
+-- Aimlock Variables and Toggles
+local isAimlockEnabled = false
+local smoothingValue = 0.15
+local targetPart = "Head"
+local teamCheck = false
+local wallCheck = false
+local fov = 80
+local showFOVRing = true
+
+-- Whitelist system variables
+local whitelistedPlayers = {}
+local whitelistEnabled = false
+
+local AimlockToggle = AimlockTab:AddToggle({
+    Name = "Aimlock Toggle",
+    Default = isAimlockEnabled,
+    Callback = function(Value)
+        isAimlockEnabled = Value
+    end
+})
+
+
+local FOVRingToggle = AimlockTab:AddToggle({
+    Name = "Show FOV Ring",
+    Default = showFOVRing,
+    Callback = function(Value)
+        showFOVRing = Value
+    end
+})
+
+local SmoothingSlider = AimlockTab:AddSlider({
+    Name = "Smoothing",
+    Min = 0,
+    Max = 1,
+    Default = smoothingValue,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 0.01,
+    ValueName = "Smoothing",
+    Callback = function(Value)
+        smoothingValue = Value
+    end
+})
+
+local TargetPartDropdown = AimlockTab:AddDropdown({
+    Name = "Target Part",
+    Default = targetPart,
+    Options = {"Head", "Torso"},
+    Callback = function(Value)
+        targetPart = Value
+    end
+})
+
+local WallCheckToggle = AimlockTab:AddToggle({
+    Name = "Wall Check",
+    Default = wallCheck,
+    Callback = function(Value)
+        wallCheck = Value
+    end
+})
+
+local TeamCheckToggle = AimlockTab:AddToggle({
+    Name = "Team Check",
+    Default = teamCheck,
+    Callback = function(Value)
+        teamCheck = Value
+    end
+})
+
+local FOVSlider = AimlockTab:AddSlider({
+    Name = "FOV",
+    Min = 1,
+    Max = 360,
+    Default = fov,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 1,
+    ValueName = "FOV",
+    Callback = function(Value)
+        fov = Value
+        if FOVring then
+            local viewportSize = camera.ViewportSize
+            local screenHeight = viewportSize.Y
+            FOVring.Radius = (Value / 4) * (screenHeight / camera.FieldOfView) * 0.5
+        end
+    end
+})
+
+local AntiAimToggle = AntiAimTab:AddToggle({
+    Name = "Enable Anti-Aimbot",
+    Default = isAntiAimbotEnabled,
+    Callback = function(Value)
+        isAntiAimbotEnabled = Value
+    end
+})
+
+-- Anti-Aimbot Mode Dropdown
+local AntiAimModeDropdown = AntiAimTab:AddDropdown({
+    Name = "Anti-Aim Mode",
+    Default = antiAimbotMode,
+    Options = {"Random", "Spin", "Glitch"},
+    Callback = function(Value)
+        antiAimbotMode = Value
+    end
+})
+
+local HeadVisibilityToggle = AntiAimTab:AddToggle({
+    Name = "Invisible Head",
+    Default = isHeadInvisible,
+    Callback = function(Value)
+        isHeadInvisible = Value
+        local character = LocalPlayer.Character
+        if character then
+            local head = character:FindFirstChild("Head")
+            if head then
+                -- Store original transparency when turning invisible
+                if Value then
+                    originalHeadTransparency = head.Transparency
+                    head.Transparency = 1
+                else
+                    head.Transparency = originalHeadTransparency
+                end
+            end
+            -- Handle face and other head accessories
+            for _, item in pairs(character:GetChildren()) do
+                if item:IsA("Accessory") and item:FindFirstChild("Handle") then
+                    item.Handle.Transparency = Value and 1 or 0
+                end
+            end
+            -- Handle face decal if it exists
+            local face = head:FindFirstChild("face")
+            if face then
+                face.Transparency = Value and 1 or 0
+            end
+        end
+    end
+})
+
+-- Anti-Aimbot Speed Slider
+local AntiAimSpeedSlider = AntiAimTab:AddSlider({
+    Name = "Anti-Aim Speed",
+    Min = 1,
+    Max = 100,
+    Default = antiAimbotSpeed,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 1,
+    ValueName = "Speed",
+    Callback = function(Value)
+        antiAimbotSpeed = Value
+    end
+})
+
+
+-- Add Whitelist Toggle
+local WhitelistToggle = WhitelistTab:AddToggle({
+    Name = "Enable Whitelist",
+    Default = whitelistEnabled,
+    Callback = function(Value)
+        whitelistEnabled = Value
+    end
+})
+
+-- Add Player to Whitelist
+WhitelistTab:AddTextbox({
+    Name = "Add Player to Whitelist",
+    Default = "",
+    TextDisappear = true,
+    Callback = function(Value)
+        local playerName = Value:lower():gsub("^%s*(.-)%s*$", "%1") -- Trim whitespace
+        
+        -- Check if player exists
+        local player = nil
+        for _, p in ipairs(game.Players:GetPlayers()) do
+            if p.Name:lower() == playerName then
+                player = p
+                break
+            end
+        end
+        
+        if player then
+            if not whitelistedPlayers[playerName] then
+                whitelistedPlayers[playerName] = true
+                OrionLib:MakeNotification({
+                    Name = "Whitelist",
+                    Content = player.Name .. " has been added to whitelist",
+                    Image = "rbxassetid://4483345998",
+                    Time = 5
+                })
+            else
+                OrionLib:MakeNotification({
+                    Name = "Whitelist",
+                    Content = player.Name .. " is already whitelisted",
+                    Image = "rbxassetid://4483345998",
+                    Time = 5
+                })
+            end
+        else
+            OrionLib:MakeNotification({
+                Name = "Whitelist Error",
+                Content = "Player not found",
+                Image = "rbxassetid://4483345998",
+                Time = 5
+            })
+        end
+    end
+})
+
+-- Remove Player from Whitelist
+WhitelistTab:AddTextbox({
+    Name = "Remove Player from Whitelist",
+    Default = "",
+    TextDisappear = true,
+    Callback = function(Value)
+        local playerName = Value:lower():gsub("^%s*(.-)%s*$", "%1") -- Trim whitespace
+        
+        if whitelistedPlayers[playerName] then
+            whitelistedPlayers[playerName] = nil
+            OrionLib:MakeNotification({
+                Name = "Whitelist",
+                Content = playerName .. " has been removed from whitelist",
+                Image = "rbxassetid://4483345998",
+                Time = 5
+            })
+        else
+            OrionLib:MakeNotification({
+                Name = "Whitelist Error",
+                Content = "Player not found in whitelist",
+                Image = "rbxassetid://4483345998",
+                Time = 5
+            })
+        end
+    end
+})
+
+-- Show Whitelisted Players
+WhitelistTab:AddButton({
+    Name = "Show Whitelisted Players",
+    Callback = function()
+        local whitelistedList = "Whitelisted Players:"
+        local hasPlayers = false
+        
+        for playerName, _ in pairs(whitelistedPlayers) do
+            whitelistedList = whitelistedList .. "- " .. playerName .. ""
+            hasPlayers = true
+        end
+        
+        if not hasPlayers then
+            whitelistedList = "No players are whitelisted"
+        end
+        
+        OrionLib:MakeNotification({
+            Name = "Whitelist",
+            Content = whitelistedList,
+            Image = "rbxassetid://4483345998",
+            Time = 10
+        })
+    end
+})
+
+-- Clear Whitelist
+WhitelistTab:AddButton({
+    Name = "Clear Whitelist",
+    Callback = function()
+        whitelistedPlayers = {}
+        OrionLib:MakeNotification({
+            Name = "Whitelist",
+            Content = "Whitelist has been cleared",
+            Image = "rbxassetid://4483345998",
+            Time = 5
+        })
+    end
+})
+
+
+-- ESP Variables
+getgenv().Toggle = false
+getgenv().TC = false
+local PlayerName = "Name"
+
+
+-- ESP Toggle
+local ESPToggle = ESPTab:AddToggle({
+    Name = "ESP Toggle",
+    Default = getgenv().Toggle,
+    Callback = function(Value)
+        getgenv().Toggle = Value
+    end
+})
+
+-- Team Check Toggle for ESP
+local TeamCheckESP = ESPTab:AddToggle({
+    Name = "ESP Team Check",
+    Default = getgenv().TC,
+    Callback = function(Value)
+        getgenv().TC = Value
+    end
+})
+
+-- Notification
+game.StarterGui:SetCore("SendNotification", {
+    Title = "Made By OWGAG",
+    Text = "The Script is Loaded. Cheater Kang KUPAL ka!",
+    Button1 = "Ok",
+    Duration = 3
+})
+
+-- Anti-aimbot functions
+local function getRandomOffset()
+    return Vector3.new(
+        math.random(-100, 100) / 100,
+        math.random(-100, 100) / 100,
+        math.random(-100, 100) / 100
+    ).Unit
+end
+
+local function updateAntiAim()
+    if not isAntiAimbotEnabled or not LocalPlayer.Character then return end
+    
+    local currentTime = tick()
+    if currentTime - lastAntiAimUpdate < ANTI_AIM_INTERVAL then return end
+    lastAntiAimUpdate = currentTime
+    
+    local character = LocalPlayer.Character
+    local humanoid = character:FindFirstChild("Humanoid")
+    local head = character:FindFirstChild("Head")
+    local neck = head and head:FindFirstChild("Neck")
+    
+    if not humanoid or not head or not neck then return end
+    
+    -- Maintain head invisibility
+    if isHeadInvisible then
+        head.Transparency = 1
+        -- Handle face and accessories
+        for _, item in pairs(character:GetChildren()) do
+            if item:IsA("Accessory") and item:FindFirstChild("Handle") then
+                item.Handle.Transparency = 1
+            end
+        end
+        local face = head:FindFirstChild("face")
+        if face then
+            face.Transparency = 1
+        end
+    end
+    
+    -- Store original neck C0
+    local originalC0 = neck.C0
+    
+    -- Apply anti-aim based on selected mode using neck motor
+    if antiAimbotMode == "Random" then
+        neck.C0 = originalC0 * CFrame.fromEulerAnglesXYZ(
+            math.rad(math.random(-60, 60)),
+            math.rad(math.random(-90, 90)),
+            math.rad(math.random(-60, 60))
+        )
+    elseif antiAimbotMode == "Spin" then
+        spinAngle = spinAngle + math.rad(antiAimbotSpeed)
+        neck.C0 = originalC0 * CFrame.fromEulerAnglesXYZ(0, spinAngle, 0)
+    elseif antiAimbotMode == "Glitch" then
+        neck.C0 = originalC0 * CFrame.fromEulerAnglesXYZ(
+            math.rad(math.random(-45, 45)) * (antiAimbotSpeed/50),
+            math.rad(math.random(-60, 60)) * (antiAimbotSpeed/50),
+            math.rad(math.random(-45, 45)) * (antiAimbotSpeed/50)
+        )
+    end
+end
+
+-- Function to Add ESP
+local function addESP(player)
+    if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        if not player.Character:FindFirstChild("Highlight") then
+            -- Create Highlight (Outline)
+            local ESPHighlight = Instance.new("Highlight")
+            ESPHighlight.Name = "Highlight"
+            ESPHighlight.Adornee = player.Character
+            ESPHighlight.Parent = player.Character
+            ESPHighlight.FillColor = player.TeamColor.Color
+            ESPHighlight.FillTransparency = 0.5 -- Semi-transparent fill
+            ESPHighlight.OutlineColor = Color3.fromRGB(255, 255, 255) -- White outline
+            ESPHighlight.OutlineTransparency = 0 -- Fully visible outline
+
+            -- Team Check Logic
+            if getgenv().TC and player.Team == LocalPlayer.Team then
+                ESPHighlight.Enabled = false -- Disable ESP for teammates if Team Check is on
+            else
+                ESPHighlight.Enabled = true
+            end
+
+            -- Create Billboard GUI (Text)
+            local Billboard = Instance.new("BillboardGui", player.Character)
+            Billboard.Name = "PlayerESP"
+            Billboard.Adornee = player.Character:FindFirstChild("HumanoidRootPart")
+            Billboard.Size = UDim2.new(0, 200, 0, 50)
+            Billboard.StudsOffset = Vector3.new(0, 2, 0) -- Adjust position above player
+            Billboard.AlwaysOnTop = true
+
+            local TextLabel = Instance.new("TextLabel", Billboard)
+            TextLabel.Size = UDim2.new(1, 0, 1, 0)
+            TextLabel.BackgroundTransparency = 1
+            TextLabel.Text = player[PlayerName]
+            TextLabel.TextColor3 = player.TeamColor.Color
+            TextLabel.Font = Enum.Font.SciFi
+            TextLabel.TextSize = 18
+        end
+    end
+end
+
+-- Function to Remove ESP
+local function removeESP(player)
+    if player.Character and player.Character:FindFirstChild("Highlight") then
+        player.Character:FindFirstChild("Highlight"):Destroy()
+    end
+    if player.Character and player.Character:FindFirstChild("PlayerESP") then
+        player.Character:FindFirstChild("PlayerESP"):Destroy()
+    end
+end
+
+local function getOrCreateDrawing(type, player, isBox)
+    local cache = isBox and drawingCache.boxes or drawingCache.texts
+    if not cache[player] then
+        local drawing = Drawing.new(type)
+        if isBox then
+            drawing.Thickness = 1.5
+            drawing.Filled = false
+        else
+            drawing.Size = 20
+            drawing.Outline = true
+        end
+        cache[player] = drawing
+    end
+    return cache[player]
+end
+
+-- Existing ESP Loop (Replace/Add Inside RenderStepped)
+local espConnection = RunService.RenderStepped:Connect(function()
+    if getgenv().Toggle then
+        local currentTime = tick()
+        if currentTime - lastUpdate < UPDATE_INTERVAL then return end
+        lastUpdate = currentTime
+
+        -- Clear old drawings visibility
+        for _, box in pairs(drawingCache.boxes) do
+            box.Visible = false
+        end
+        for _, text in pairs(drawingCache.texts) do
+            text.Visible = false
+        end
+
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                -- Team Check
+                if not getgenv().TC or player.Team ~= LocalPlayer.Team then
+                    local character = player.Character
+                    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+                    local head = character:FindFirstChild("Head")
+                    local humanoid = character:FindFirstChild("Humanoid")
+
+                    if humanoidRootPart and head and humanoid then
+                        local rootPos, rootOnScreen = workspace.CurrentCamera:WorldToViewportPoint(humanoidRootPart.Position)
+                        local headPos, headOnScreen = workspace.CurrentCamera:WorldToViewportPoint(head.Position)
+
+                        if rootOnScreen and headOnScreen then
+                            -- Calculate box dimensions
+                            local boxHeight = math.abs(headPos.Y - rootPos.Y) * 2
+                            local boxWidth = boxHeight / 1.5
+                            local topLeft = Vector2New(rootPos.X - boxWidth / 2, rootPos.Y - boxHeight / 2)
+
+                            -- Get or create ESP Box
+                            local ESPBox = getOrCreateDrawing("Square", player, true)
+                            ESPBox.Visible = true
+                            ESPBox.Color = player.TeamColor.Color
+                            ESPBox.Position = topLeft
+                            ESPBox.Size = Vector2New(boxWidth, boxHeight)
+
+                            -- Get or create ESP Text
+                            local ESPText = getOrCreateDrawing("Text", player, false)
+                            ESPText.Visible = true
+                            ESPText.Text = player.Name
+                            ESPText.Color = player.TeamColor.Color
+                            ESPText.Position = Vector2New(topLeft.X + boxWidth / 2, topLeft.Y - 20)
+                        end
+                    end
+                end
+            end
+        end
+    else
+        -- Hide all drawings when Toggle is off
+        for _, box in pairs(drawingCache.boxes) do
+            box.Visible = false
+        end
+        for _, text in pairs(drawingCache.texts) do
+            text.Visible = false
+        end
+    end
+end)
+table.insert(connections, espConnection)
+
+-- Remove ESP when Player Leaves
+local playerRemovingConnection = Players.PlayerRemoving:Connect(function(player)
+    removeESP(player)
+end)
+table.insert(connections, playerRemovingConnection)
+
+-- Team Color Change Handler (Optional)
+local playerAddedConnection = Players.PlayerAdded:Connect(function(player)
+    local teamColorConnection = player:GetPropertyChangedSignal("TeamColor"):Connect(function()
+        if player.Character and player.Character:FindFirstChild("Highlight") then
+            player.Character:FindFirstChild("Highlight").FillColor = player.TeamColor.Color
+        end
+        if player.Character and player.Character:FindFirstChild("PlayerESP") then
+            local TextLabel = player.Character:FindFirstChild("PlayerESP"):FindFirstChild("TextLabel")
+            if TextLabel then
+                TextLabel.TextColor3 = player.TeamColor.Color
+            end
+        end
+    end)
+    -- Store the team color connection as well
+    table.insert(connections, teamColorConnection)
+end)
+table.insert(connections, playerAddedConnection)
+
+local function cleanupDrawings()
+    for _, box in pairs(drawingCache.boxes) do
+        box:Remove()
+    end
+    for _, text in pairs(drawingCache.texts) do
+        text:Remove()
+    end
+    table.clear(drawingCache.boxes)
+    table.clear(drawingCache.texts)
+    table.clear(cachedPositions)
+end
+
+
+-- Improved Kill Script Button
+SettingsTab:AddButton({
+    Name = "Kill Script",
+    Callback = function()
+        -- Disconnect all connections
+        for _, connection in ipairs(connections) do
+            if typeof(connection) == "RBXScriptConnection" and connection.Connected then
+                connection:Disconnect()
+            end
+        end
+        
+        -- Remove all drawings
+        pcall(function()
+            for _, drawing in ipairs(Drawing.GetObjects()) do
+                drawing:Remove()
+            end
+        end)
+        
+        -- Remove ESP
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character then
+                local highlight = player.Character:FindFirstChild("Highlight")
+                local esp = player.Character:FindFirstChild("PlayerESP")
+                if highlight then highlight:Destroy() end
+                if esp then esp:Destroy() end
+            end
+        end
+
+         -- Reset anti-aimbot
+         isAntiAimbotEnabled = false
+        if LocalPlayer.Character then
+            local head = LocalPlayer.Character:FindFirstChild("Head")
+            if head then
+                head.Transparency = originalHeadTransparency
+                local face = head:FindFirstChild("face")
+                if face then
+                    face.Transparency = 0
+                end
+            end
+            -- Reset accessories visibility
+            for _, item in pairs(LocalPlayer.Character:GetChildren()) do
+                if item:IsA("Accessory") and item:FindFirstChild("Handle") then
+                    item.Handle.Transparency = 0
+                end
+            end
+            local neck = head and head:FindFirstChild("Neck")
+            if neck then
+                neck.C0 = CFrame.new(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0)
+            end
+        end
+
+        -- Destroy UI
+        OrionLib:Destroy()
+        
+        -- Clear variables
+        workspace.CurrentCamera.CFrame = workspace.CurrentCamera.CFrame
+        isAimlockEnabled = false
+        showFOVRing = false
+        
+        -- Force garbage collection
+        for i = 1, 5 do
+            game:GetService("RunService").RenderStepped:Wait()
+        end
+    end
+})
+-- Add these to your Settings tab
+SettingsTab:AddSlider({
+    Name = "ESP Update Interval",
+    Min = 0.01,
+    Max = 0.1,
+    Default = 0.03,
+    Increment = 0.01,
+    ValueName = "seconds",
+    Callback = function(Value)
+        UPDATE_INTERVAL = Value
+    end
+})
+
+SettingsTab:AddSlider({
+    Name = "Max ESP Distance",
+    Min = 50,
+    Max = 1000,
+    Default = 500,
+    Increment = 50,
+    ValueName = "studs",
+    Callback = function(Value)
+        ESP_MAX_DISTANCE = Value
+    end
+})
+
+-- Variables for aimlock
+local FOVring = Drawing.new("Circle")
+FOVring.Visible = showFOVRing
+FOVring.Thickness = 1.5
+FOVring.Transparency = 1
+FOVring.Color = Color3.fromRGB(255, 128, 128)
+local initialViewportSize = camera.ViewportSize
+FOVring.Radius = (fov / 2) * (initialViewportSize.Y / camera.FieldOfView)
+
+local Line = Drawing.new("Line")
+Line.Visible = false
+Line.Thickness = 1.5
+Line.Transparency = 1
+Line.Color = Color3.fromRGB(255, 255, 255)
+
+-- Function to check if a player is alive
+local function isAlive(character)
+    if not character then return false end
+    local humanoid = character:FindFirstChild("Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+-- Function to check if target is visible
+local function isVisible(character)
+    if not wallCheck then return true end
+    
+    local localPlayer = game.Players.LocalPlayer
+    local localCharacter = localPlayer.Character
+    if not localCharacter then return false end
+    
+    local localHead = localCharacter:FindFirstChild("Head")
+    if not localHead then return false end
+    
+    local targetHead = character:FindFirstChild("Head")
+    if not targetHead then return false end
+    
+    local ray = Ray.new(localHead.Position, (targetHead.Position - localHead.Position).Unit * 1000)
+    local ignoreList = {localCharacter, camera}
+    local hit = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    
+    return hit and hit:IsDescendantOf(character)
+end
+
+local function updateFOVRing()
+    if not FOVring then return end
+    local viewportSize = camera.ViewportSize
+    local screenCenter = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+    FOVring.Position = screenCenter
+    local screenHeight = viewportSize.Y
+    -- Apply the same adjusted scaling here
+    FOVring.Radius = (fov / 4) * (screenHeight / camera.FieldOfView) * 0.5
+end
+
+-- Function to get closest player
+local function getClosestPlayer()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+    local localPlayer = game.Players.LocalPlayer
+    local mousePos = UserInputService:GetMouseLocation()
+    
+    for _, player in pairs(game.Players:GetPlayers()) do
+        if player ~= localPlayer then
+            -- Check whitelist
+            if not (whitelistEnabled and whitelistedPlayers[player.Name:lower()]) then
+                if player.Character and isAlive(player.Character) then
+                    if not teamCheck or player.Team ~= localPlayer.Team then
+                        if not wallCheck or isVisible(player.Character) then
+                            local targetPartObject
+                            if targetPart == "Torso" then
+                                targetPartObject = player.Character:FindFirstChild("HumanoidRootPart") or 
+                                                 player.Character:FindFirstChild("Torso") or 
+                                                 player.Character:FindFirstChild("UpperTorso")
+                            else
+                                targetPartObject = player.Character:FindFirstChild(targetPart)
+                            end
+                            
+                            if targetPartObject then
+                                local screenPoint, onScreen = camera:WorldToViewportPoint(targetPartObject.Position)
+                                if onScreen then
+                                    local screenPosition = Vector2.new(screenPoint.X, screenPoint.Y)
+                                    local distance = (screenPosition - mousePos).Magnitude
+                                    
+                                    if distance <= FOVring.Radius then
+                                        if distance < shortestDistance then
+                                            closestPlayer = player
+                                            shortestDistance = distance
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
+-- Update main aimlock function to handle target parts properly
+local function updateAim()
+    FOVring.Visible = isAimlockEnabled and showFOVRing
+    
+    if FOVring.Visible then
+        updateFOVRing()
+    end
+    
+    if isAimlockEnabled and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local target = getClosestPlayer()
+        if target and target.Character and cachedPositions[target] then
+            local targetPartObject = target.Character:FindFirstChild(targetPart)
+            if targetPartObject then
+                local targetPos = targetPartObject.Position
+                local transform = cachedPositions[target]
+                
+                if transform.onScreen then
+                    -- Use transform.position instead of screenPoint
+                    Line.From = Vector2New(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+                    Line.To = Vector2New(transform.position.X, transform.position.Y)
+                    Line.Visible = true
+                    
+                    local targetCFrame = CFrame.new(camera.CFrame.Position, targetPos)
+                    camera.CFrame = camera.CFrame:Lerp(targetCFrame, smoothingValue)
+                else
+                    Line.Visible = false
+                end
+            end
+        else
+            Line.Visible = false
+        end
+    else
+        Line.Visible = false
+    end
+end
+-- Connect the update function
+local function onStep()
+    cacheCharacterPositions() -- Add this
+    updateAim()
+    updateAntiAim()
+end
+
+local stepConnection = RunService.RenderStepped:Connect(onStep)
+table.insert(connections, stepConnection)
+
+local function onViewportSizeChanged()
+    viewportSize = camera.ViewportSize
+    screenCenter = Vector2New(viewportSize.X / 2, viewportSize.Y / 2)
+    updateFOVRing()
+end
+
+local viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(onViewportSizeChanged)
+table.insert(connections, viewportConnection)
