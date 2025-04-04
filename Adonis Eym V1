@@ -1,0 +1,469 @@
+--AIMBOT BYPASS ADONIS
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
+
+local AimEnabled = false  -- Toggle aim on/off
+local AimMode = "Hold" -- Options: "Toggle", "Hold"
+local Smoothness = 0.1   -- Lower value for ultra-smooth tracking (closer to 0 is slower, more precise)
+local AimbotMode = "Smooth" -- Options: "Instant", "Smooth"
+local TargetPart = "Head" -- Options: "Body", "Head"
+local WallCheckEnabled = true -- Toggle wall check on/off
+local TeamCheckEnabled = false -- Toggle team check on/off
+local Friends = {} -- Table to store friends' names
+local GUIEnabled = true -- Toggle GUI on/off
+local FOV = 100 -- Default FOV radius
+local ShowFOV = true -- Toggle FOV circle visibility
+local FOVCircle = Drawing.new("Circle") -- Create FOV circle
+local ScreenResolution = Vector2.new(Camera.ViewportSize.X, Camera.ViewportSize.Y)
+local Center = Vector2.new(ScreenResolution.X / 2, ScreenResolution.Y / 2)
+FOVCircle.Thickness = 2
+FOVCircle.Color = Color3.new(1, 1, 1)
+FOVCircle.Transparency = 1
+FOVCircle.Filled = false
+FOVCircle.Visible = ShowFOV
+local function updateCenter()
+    ScreenResolution = Vector2.new(Camera.ViewportSize.X, Camera.ViewportSize.Y)
+    Center = Vector2.new(ScreenResolution.X / 2, ScreenResolution.Y / 2)
+end
+
+-- GUI Elements
+local ScreenGui = Instance.new("ScreenGui")
+local MainFrame = Instance.new("Frame")
+local Title = Instance.new("TextLabel")
+local MinimizeButton = Instance.new("TextButton")
+local AddFriendButton = Instance.new("TextButton")
+local RemoveFriendButton = Instance.new("TextButton")
+local FriendNameBox = Instance.new("TextBox")
+local ToggleBodyHeadButton = Instance.new("TextButton")
+local ToggleWallCheckButton = Instance.new("TextButton")
+local ToggleTeamCheckButton = Instance.new("TextButton")
+local SmoothnessBox = Instance.new("TextBox")
+local ToggleAimbotButton = Instance.new("TextButton")
+local ToggleAimModeButton = Instance.new("TextButton")
+local ToggleAimbotModeButton = Instance.new("TextButton")
+local FOVBox = Instance.new("TextBox")
+local ToggleFOVCircleButton = Instance.new("TextButton")
+
+-- Display GUI
+ScreenGui.Parent = game.CoreGui
+
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+MainFrame.Size = UDim2.new(0, 300, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -150, 0.5, -170)
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+Title.Name = "Title"
+Title.Parent = MainFrame
+Title.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Font = Enum.Font.SourceSans
+Title.Text = "Aimbot GUI"
+Title.TextColor3 = Color3.new(1, 1, 1)
+Title.TextSize = 20
+
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Parent = MainFrame
+MinimizeButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Position = UDim2.new(1, -30, 0, 0)
+MinimizeButton.Font = Enum.Font.SourceSans
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.new(1, 1, 1)
+MinimizeButton.TextSize = 20
+
+AddFriendButton.Name = "AddFriendButton"
+AddFriendButton.Parent = MainFrame
+AddFriendButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+AddFriendButton.Size = UDim2.new(0, 140, 0, 30)
+AddFriendButton.Position = UDim2.new(0, 10, 0, 40)
+AddFriendButton.Font = Enum.Font.SourceSans
+AddFriendButton.Text = "Add Friend"
+AddFriendButton.TextColor3 = Color3.new(1, 1, 1)
+AddFriendButton.TextSize = 20
+
+RemoveFriendButton.Name = "RemoveFriendButton"
+RemoveFriendButton.Parent = MainFrame
+RemoveFriendButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+RemoveFriendButton.Size = UDim2.new(0, 140, 0, 30)
+RemoveFriendButton.Position = UDim2.new(0, 160, 0, 40)
+RemoveFriendButton.Font = Enum.Font.SourceSans
+RemoveFriendButton.Text = "Remove Friend"
+RemoveFriendButton.TextColor3 = Color3.new(1, 1, 1)
+RemoveFriendButton.TextSize = 20
+
+FriendNameBox.Name = "FriendNameBox"
+FriendNameBox.Parent = MainFrame
+FriendNameBox.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+FriendNameBox.Size = UDim2.new(0, 280, 0, 30)
+FriendNameBox.Position = UDim2.new(0, 10, 0, 80)
+FriendNameBox.Font = Enum.Font.SourceSans
+FriendNameBox.PlaceholderText = "Enter Friend's Name"
+FriendNameBox.Text = ""
+FriendNameBox.TextColor3 = Color3.new(1, 1, 1)
+FriendNameBox.TextSize = 20
+
+FOVBox.Name = "FOVBox"
+FOVBox.Parent = MainFrame
+FOVBox.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+FOVBox.Size = UDim2.new(0, 140, 0, 30)
+FOVBox.Position = UDim2.new(0, 10, 0, 320)
+FOVBox.Font = Enum.Font.SourceSans
+FOVBox.PlaceholderText = "FOV: " .. FOV
+FOVBox.Text = ""
+FOVBox.TextColor3 = Color3.new(1, 1, 1)
+FOVBox.TextSize = 20
+
+ToggleFOVCircleButton.Name = "ToggleFOVCircleButton"
+ToggleFOVCircleButton.Parent = MainFrame
+ToggleFOVCircleButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleFOVCircleButton.Size = UDim2.new(0, 140, 0, 30)
+ToggleFOVCircleButton.Position = UDim2.new(0, 160, 0, 320)
+ToggleFOVCircleButton.Font = Enum.Font.SourceSans
+ToggleFOVCircleButton.Text = "Show FOV: On"
+ToggleFOVCircleButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleFOVCircleButton.TextSize = 20
+
+ToggleBodyHeadButton.Name = "ToggleBodyHeadButton"
+ToggleBodyHeadButton.Parent = MainFrame
+ToggleBodyHeadButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleBodyHeadButton.Size = UDim2.new(0, 280, 0, 30)
+ToggleBodyHeadButton.Position = UDim2.new(0, 10, 0, 120)
+ToggleBodyHeadButton.Font = Enum.Font.SourceSans
+ToggleBodyHeadButton.Text = "Target: Head"
+ToggleBodyHeadButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleBodyHeadButton.TextSize = 20
+
+ToggleWallCheckButton.Name = "ToggleWallCheckButton"
+ToggleWallCheckButton.Parent = MainFrame
+ToggleWallCheckButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleWallCheckButton.Size = UDim2.new(0, 280, 0, 30)
+ToggleWallCheckButton.Position = UDim2.new(0, 10, 0, 160)
+ToggleWallCheckButton.Font = Enum.Font.SourceSans
+ToggleWallCheckButton.Text = "Wall Check: Enabled"
+ToggleWallCheckButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleWallCheckButton.TextSize = 20
+
+ToggleTeamCheckButton.Name = "ToggleTeamCheckButton"
+ToggleTeamCheckButton.Parent = MainFrame
+ToggleTeamCheckButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleTeamCheckButton.Size = UDim2.new(0, 280, 0, 30)
+ToggleTeamCheckButton.Position = UDim2.new(0, 10, 0, 200)
+ToggleTeamCheckButton.Font = Enum.Font.SourceSans
+ToggleTeamCheckButton.Text = "Team Check: Enabled"
+ToggleTeamCheckButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleTeamCheckButton.TextSize = 20
+
+SmoothnessBox.Name = "SmoothnessBox"
+SmoothnessBox.Parent = MainFrame
+SmoothnessBox.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+SmoothnessBox.Size = UDim2.new(0, 140, 0, 30)
+SmoothnessBox.Position = UDim2.new(0, 10, 0, 240)
+SmoothnessBox.Font = Enum.Font.SourceSans
+SmoothnessBox.PlaceholderText = "Smoothness: " .. Smoothness
+SmoothnessBox.Text = ""
+SmoothnessBox.TextColor3 = Color3.new(1, 1, 1)
+SmoothnessBox.TextSize = 20
+
+ToggleAimbotButton.Name = "ToggleAimbotButton"
+ToggleAimbotButton.Parent = MainFrame
+ToggleAimbotButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleAimbotButton.Size = UDim2.new(0, 140, 0, 30)
+ToggleAimbotButton.Position = UDim2.new(0, 160, 0, 240)
+ToggleAimbotButton.Font = Enum.Font.SourceSans
+ToggleAimbotButton.Text = "Aimbot: Off"
+ToggleAimbotButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleAimbotButton.TextSize = 20
+
+ToggleAimModeButton.Name = "ToggleAimModeButton"
+ToggleAimModeButton.Parent = MainFrame
+ToggleAimModeButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleAimModeButton.Size = UDim2.new(0, 140, 0, 30)
+ToggleAimModeButton.Position = UDim2.new(0, 10, 0, 280)
+ToggleAimModeButton.Font = Enum.Font.SourceSans
+ToggleAimModeButton.Text = "Aim Mode: Hold"
+ToggleAimModeButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleAimModeButton.TextSize = 20
+
+ToggleAimbotModeButton.Name = "ToggleAimbotModeButton"
+ToggleAimbotModeButton.Parent = MainFrame
+ToggleAimbotModeButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleAimbotModeButton.Size = UDim2.new(0, 140, 0, 30)
+ToggleAimbotModeButton.Position = UDim2.new(0, 160, 0, 280)
+ToggleAimbotModeButton.Font = Enum.Font.SourceSans
+ToggleAimbotModeButton.Text = "Aimbot Mode: Smooth"
+ToggleAimbotModeButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleAimbotModeButton.TextSize = 20
+
+-- Function to get torso for body shots in R6 and R15 models
+local function getBody(character)
+    return character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
+end
+
+-- Function to get head for headshots in R6 and R15 models
+local function getHead(character)
+    return character:FindFirstChild("Head")
+end
+
+-- Function to check if a target is visible (no walls)
+local function isVisible(target)
+    local origin = Camera.CFrame.Position
+    local direction = (target.Position - origin).unit * (target.Position - origin).Magnitude
+    local ray = Ray.new(origin, direction)
+    
+    -- Create a table of parts to ignore
+    local ignoreList = {LocalPlayer.Character}
+    if target.Parent then
+        table.insert(ignoreList, target.Parent)
+    end
+    
+    local hit, pos = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    return hit == nil or hit:IsDescendantOf(target.Parent)
+end
+
+-- Function to check if a player is on the same team
+local function isTeammate(player)
+    return player.Team == LocalPlayer.Team
+end
+
+-- Function to find the closest player's target part with improved precision, updating on respawn
+local function getClosestPlayer()
+    local closestTarget = nil
+    local shortestDistance = FOV -- Use FOV as the maximum distance instead of math.huge
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and not Friends[player.Name] and (not TeamCheckEnabled or not isTeammate(player)) then
+            local character = player.Character
+            local humanoid = character:FindFirstChild("Humanoid")
+            
+            -- Check if player is alive
+            if humanoid and humanoid.Health > 0 then
+                local targetPart = TargetPart == "Head" and getHead(character) or getBody(character)
+                if targetPart then
+                    -- Wall check implementation
+                    if not WallCheckEnabled or isVisible(targetPart) then
+                        local _, onScreen = Camera:WorldToScreenPoint(targetPart.Position)
+                        
+                        if onScreen then
+                            local targetPos = targetPart.Position
+                            local screenPoint = Camera:WorldToScreenPoint(targetPos)
+                            local mouseDistance = (Vector2.new(Mouse.X, Mouse.Y) - Vector2.new(screenPoint.X, screenPoint.Y)).Magnitude
+                            
+                            -- Check if target is within FOV
+                            if mouseDistance < shortestDistance then
+                                shortestDistance = mouseDistance
+                                closestTarget = targetPart
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closestTarget
+end
+
+-- Aimbot Function
+local function aimAtTarget()
+    local target = getClosestPlayer()
+    
+    if target then
+        local targetPos = target.Position
+        
+        -- Check if target's humanoid is still alive
+        local humanoid = target.Parent:FindFirstChild("Humanoid")
+        if humanoid and humanoid.Health <= 0 then
+            return
+        end
+        
+        if AimbotMode == "Instant" then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+        elseif AimbotMode == "Smooth" then
+            if (targetPos - Camera.CFrame.Position).Magnitude <= 1000 then
+                Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, targetPos), Smoothness)
+            end
+        end
+    end
+end
+
+-- FOV Box
+FOVBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local fovValue = tonumber(FOVBox.Text)
+        if fovValue then
+            -- Clamp FOV value between 10 and 800
+            fovValue = math.clamp(fovValue, 10, 800)
+            FOV = fovValue
+            FOVBox.PlaceholderText = "FOV: " .. FOV
+            FOVBox.Text = ""
+        else
+            FOVBox.Text = ""
+        end
+    end
+end)
+
+-- Toggle Aimbot on right click hold
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        -- Right mouse button pressed, update FOV circle position to center
+        FOVCircle.Position = Center
+        
+        -- Handle aim mode
+        if AimMode == "Hold" then
+            AimEnabled = true
+        elseif AimMode == "Toggle" then
+            AimEnabled = not AimEnabled
+            ToggleAimbotButton.Text = "Aimbot: " .. (AimEnabled and "On" or "Off")
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 and AimMode == "Hold" then
+        AimEnabled = false
+    end
+end)
+
+-- Add Friend Button
+AddFriendButton.MouseButton1Click:Connect(function()
+    local friendName = FriendNameBox.Text
+    if friendName ~= "" then
+        Friends[friendName] = true
+        print(friendName .. " has been added to friends list.")
+        FriendNameBox.Text = ""
+    end
+end)
+
+-- Remove Friend Button
+RemoveFriendButton.MouseButton1Click:Connect(function()
+    local friendName = FriendNameBox.Text
+    if friendName ~= "" then
+        Friends[friendName] = nil
+        print(friendName .. " has been removed from friends list.")
+        FriendNameBox.Text = ""
+    end
+end)
+
+-- Toggle Body/Head Button
+ToggleBodyHeadButton.MouseButton1Click:Connect(function()
+    if TargetPart == "Head" then
+        TargetPart = "Body"
+        ToggleBodyHeadButton.Text = "Target: Body"
+    else
+        TargetPart = "Head"
+        ToggleBodyHeadButton.Text = "Target: Head"
+    end
+end)
+
+-- Toggle FOV Circle Button
+ToggleFOVCircleButton.MouseButton1Click:Connect(function()
+    ShowFOV = not ShowFOV
+    FOVCircle.Visible = ShowFOV
+    ToggleFOVCircleButton.Text = "Show FOV: " .. (ShowFOV and "On" or "Off")
+end)
+
+-- Toggle Wall Check Button
+ToggleWallCheckButton.MouseButton1Click:Connect(function()
+    WallCheckEnabled = not WallCheckEnabled
+    ToggleWallCheckButton.Text = "Wall Check: " .. (WallCheckEnabled and "Enabled" or "Disabled")
+end)
+
+-- Toggle Team Check Button
+ToggleTeamCheckButton.MouseButton1Click:Connect(function()
+    TeamCheckEnabled = not TeamCheckEnabled
+    ToggleTeamCheckButton.Text = "Team Check: " .. (TeamCheckEnabled and "Enabled" or "Disabled")
+end)
+
+-- Smoothness Box
+SmoothnessBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local smoothnessValue = tonumber(SmoothnessBox.Text)
+        if smoothnessValue and smoothnessValue >= 0 and smoothnessValue <= 1 then
+            Smoothness = smoothnessValue
+            SmoothnessBox.PlaceholderText = "Smoothness: " .. Smoothness
+            SmoothnessBox.Text = ""
+        else
+            SmoothnessBox.Text = ""
+        end
+    end
+end)
+
+-- Toggle Aimbot Button
+ToggleAimbotButton.MouseButton1Click:Connect(function()
+    AimEnabled = not AimEnabled
+    ToggleAimbotButton.Text = "Aimbot: " .. (AimEnabled and "On" or "Off")
+end)
+
+-- Toggle Aim Mode Button
+ToggleAimModeButton.MouseButton1Click:Connect(function()
+    if AimMode == "Hold" then
+        AimMode = "Toggle"
+        ToggleAimModeButton.Text = "Aim Mode: Toggle"
+    else
+        AimMode = "Hold"
+        ToggleAimModeButton.Text = "Aim Mode: Hold"
+    end
+end)
+
+-- Toggle Aimbot Mode Button
+ToggleAimbotModeButton.MouseButton1Click:Connect(function()
+    if AimbotMode == "Smooth" then
+        AimbotMode = "Instant"
+        ToggleAimbotModeButton.Text = "Aimbot Mode: Instant"
+    else
+        AimbotMode = "Smooth"
+        ToggleAimbotModeButton.Text = "Aimbot Mode: Smooth"
+    end
+end)
+
+-- Minimize Button
+MinimizeButton.MouseButton1Click:Connect(function()
+    GUIEnabled = not GUIEnabled
+    for _, child in pairs(MainFrame:GetChildren()) do
+        if child ~= Title and child ~= MinimizeButton then
+            child.Visible = GUIEnabled
+        end
+    end
+    MainFrame.Size = UDim2.new(0, 300, 0, GUIEnabled and 380 or 30) -- Updated height
+    MinimizeButton.Text = GUIEnabled and "-" or "+"
+    -- Update FOV circle visibility when minimizing
+    FOVCircle.Visible = GUIEnabled and ShowFOV
+end)
+
+-- Run Aimbot every frame
+RunService.RenderStepped:Connect(function()
+    if ShowFOV and GUIEnabled then
+        if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+            FOVCircle.Position = Center
+        else
+            FOVCircle.Position = Vector2.new(Mouse.X, Mouse.Y)
+        end
+        FOVCircle.Radius = FOV
+        FOVCircle.Visible = true
+    else
+        FOVCircle.Visible = false
+    end
+    
+    if AimEnabled then
+        aimAtTarget()
+    end
+end)
+
+Camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateCenter)
+
+
+-- Cleanup
+game:GetService("CoreGui").ChildRemoved:Connect(function(child)
+    if child == ScreenGui then
+        FOVCircle:Remove()
+    end
+end)
+
+-- Notify the user that the script has loaded
+print("Enhanced Aimbot script with GUI loaded successfully.")
