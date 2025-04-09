@@ -214,7 +214,7 @@ ToggleAimbotModeButton.TextSize = 20
 
 -- Function to get torso for body shots in R6 and R15 models
 local function getBodyWithOffset(character, useHeadOffset)
-    local offset = Vector3.new(0, useHeadOffset and 2 or 0, 0) -- Offset for head targeting
+    local offset = Vector3.new(0, useHeadOffset and 1.5 or 0, 0) -- Offset for head targeting
     
     -- Try to get UpperTorso first (R15)
     local upperTorso = character:FindFirstChild("UpperTorso")
