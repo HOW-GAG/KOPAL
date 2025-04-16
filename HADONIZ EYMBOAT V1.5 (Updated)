@@ -1,0 +1,620 @@
+--HADONIZ EYMBOAT V1.5 
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
+
+local AimEnabled = false  -- Toggle aim on/off
+local AimMode = "Hold" -- Options: "Toggle", "Hold"
+local Smoothness = 0.1   -- Lower value for ultra-smooth tracking (closer to 0 is slower, more precise)
+local AimbotMode = "Smooth" -- Options: "Instant", "Smooth"
+local TargetPart = "Head" -- Options: "Body", "Head"
+local WallCheckEnabled = true -- Toggle wall check on/off
+local TeamCheckEnabled = false -- Toggle team check on/off
+local Friends = {} -- Table to store friends' names
+local GUIEnabled = true -- Toggle GUI on/off
+local FOV = 100 -- Default FOV radius
+local ShowFOV = true -- Toggle FOV circle visibility
+local FOVCircle = Drawing.new("Circle") -- Create FOV circle
+local ScreenResolution = Vector2.new(Camera.ViewportSize.X, Camera.ViewportSize.Y)
+local Center = Vector2.new(ScreenResolution.X / 2, ScreenResolution.Y / 2 - 90)
+FOVCircle.Thickness = 1
+FOVCircle.NumSides = 60
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+FOVCircle.Transparency = 1
+FOVCircle.Filled = false
+
+local function updateCenter()
+    ScreenResolution = Vector2.new(Camera.ViewportSize.X, Camera.ViewportSize.Y)
+    Center = Vector2.new(ScreenResolution.X / 2, ScreenResolution.Y / 2)
+end
+
+-- GUI Elements
+local ScreenGui = Instance.new("ScreenGui")
+local MainFrame = Instance.new("Frame")
+local Title = Instance.new("TextLabel")
+local MinimizeButton = Instance.new("TextButton")
+local PlayerListFrame = Instance.new("Frame")
+local PlayerScrollingFrame = Instance.new("ScrollingFrame")
+local RefreshButton = Instance.new("TextButton")
+local PlayerListLayout = Instance.new("UIListLayout")
+local ToggleBodyHeadButton = Instance.new("TextButton")
+local ToggleWallCheckButton = Instance.new("TextButton")
+local ToggleTeamCheckButton = Instance.new("TextButton")
+local SmoothnessBox = Instance.new("TextBox")
+local ToggleAimbotButton = Instance.new("TextButton")
+local ToggleAimModeButton = Instance.new("TextButton")
+local ToggleAimbotModeButton = Instance.new("TextButton")
+local FOVBox = Instance.new("TextBox")
+local ToggleFOVCircleButton = Instance.new("TextButton")
+
+-- Display GUI
+ScreenGui.Parent = game.CoreGui
+
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+MainFrame.Size = UDim2.new(0, 300, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -150, 0.5, -170)
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+Title.Name = "Title"
+Title.Parent = MainFrame
+Title.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Font = Enum.Font.SourceSans
+Title.Text = "HADONIZ EYMBOAT"
+Title.TextColor3 = Color3.new(1, 1, 1)
+Title.TextSize = 20
+
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Parent = MainFrame
+MinimizeButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Position = UDim2.new(1, -30, 0, 0)
+MinimizeButton.Font = Enum.Font.SourceSans
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.new(1, 1, 1)
+MinimizeButton.TextSize = 20
+
+PlayerListFrame.Name = "PlayerListFrame"
+PlayerListFrame.Parent = MainFrame
+PlayerListFrame.BackgroundColor3 = Color3.new(0.25, 0.25, 0.25)
+PlayerListFrame.BorderSizePixel = 0
+PlayerListFrame.Position = UDim2.new(0, 10, 0, 40)
+PlayerListFrame.Size = UDim2.new(0, 280, 0, 120)
+
+PlayerScrollingFrame.Name = "PlayerScrollingFrame"
+PlayerScrollingFrame.Parent = PlayerListFrame
+PlayerScrollingFrame.BackgroundTransparency = 1
+PlayerScrollingFrame.Position = UDim2.new(0, 0, 0, 30)
+PlayerScrollingFrame.Size = UDim2.new(1, 0, 1, -30)
+PlayerScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+PlayerScrollingFrame.ScrollBarThickness = 6
+PlayerScrollingFrame.ScrollingEnabled = true
+
+RefreshButton.Name = "RefreshButton"
+RefreshButton.Parent = PlayerListFrame
+RefreshButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+RefreshButton.Size = UDim2.new(1, 0, 0, 30)
+RefreshButton.Font = Enum.Font.SourceSans
+RefreshButton.Text = "Refresh Player List"
+RefreshButton.TextColor3 = Color3.new(1, 1, 1)
+RefreshButton.TextSize = 16
+
+PlayerListLayout.Parent = PlayerScrollingFrame
+PlayerListLayout.SortOrder = Enum.SortOrder.Name
+PlayerListLayout.Padding = UDim.new(0, 2)
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Name = "StatusLabel"
+StatusLabel.Parent = PlayerListFrame
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Position = UDim2.new(0, 0, 0, 30)
+StatusLabel.Size = UDim2.new(1, 0, 0, 20)
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.TextColor3 = Color3.new(1, 1, 1)
+StatusLabel.TextSize = 14
+StatusLabel.Visible = false
+
+FOVBox.Name = "FOVBox"
+FOVBox.Parent = MainFrame
+FOVBox.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+FOVBox.Size = UDim2.new(0, 140, 0, 30)
+FOVBox.Position = UDim2.new(0, 10, 0, 370)
+FOVBox.Font = Enum.Font.SourceSans
+FOVBox.PlaceholderText = "FOV: " .. FOV
+FOVBox.Text = ""
+FOVBox.TextColor3 = Color3.new(1, 1, 1)
+FOVBox.TextSize = 20
+
+ToggleFOVCircleButton.Name = "ToggleFOVCircleButton"
+ToggleFOVCircleButton.Parent = MainFrame
+ToggleFOVCircleButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleFOVCircleButton.Size = UDim2.new(0, 140, 0, 30)
+ToggleFOVCircleButton.Position = UDim2.new(0, 160, 0, 370)
+ToggleFOVCircleButton.Font = Enum.Font.SourceSans
+ToggleFOVCircleButton.Text = "Show FOV: On"
+ToggleFOVCircleButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleFOVCircleButton.TextSize = 20
+
+ToggleBodyHeadButton.Name = "ToggleBodyHeadButton"
+ToggleBodyHeadButton.Parent = MainFrame
+ToggleBodyHeadButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleBodyHeadButton.Size = UDim2.new(0, 280, 0, 30)
+ToggleBodyHeadButton.Position = UDim2.new(0, 10, 0, 170)
+ToggleBodyHeadButton.Font = Enum.Font.SourceSans
+ToggleBodyHeadButton.Text = "Target: Head"
+ToggleBodyHeadButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleBodyHeadButton.TextSize = 20
+
+ToggleWallCheckButton.Name = "ToggleWallCheckButton"
+ToggleWallCheckButton.Parent = MainFrame
+ToggleWallCheckButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleWallCheckButton.Size = UDim2.new(0, 280, 0, 30)
+ToggleWallCheckButton.Position = UDim2.new(0, 10, 0, 210)
+ToggleWallCheckButton.Font = Enum.Font.SourceSans
+ToggleWallCheckButton.Text = "Wall Check: Enabled"
+ToggleWallCheckButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleWallCheckButton.TextSize = 20
+
+ToggleTeamCheckButton.Name = "ToggleTeamCheckButton"
+ToggleTeamCheckButton.Parent = MainFrame
+ToggleTeamCheckButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleTeamCheckButton.Size = UDim2.new(0, 280, 0, 30)
+ToggleTeamCheckButton.Position = UDim2.new(0, 10, 0, 250)
+ToggleTeamCheckButton.Font = Enum.Font.SourceSans
+ToggleTeamCheckButton.Text = "Team Check: Enabled"
+ToggleTeamCheckButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleTeamCheckButton.TextSize = 20
+
+SmoothnessBox.Name = "SmoothnessBox"
+SmoothnessBox.Parent = MainFrame
+SmoothnessBox.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+SmoothnessBox.Size = UDim2.new(0, 140, 0, 30)
+SmoothnessBox.Position = UDim2.new(0, 10, 0, 290)
+SmoothnessBox.Font = Enum.Font.SourceSans
+SmoothnessBox.PlaceholderText = "Smoothness: " .. Smoothness
+SmoothnessBox.Text = ""
+SmoothnessBox.TextColor3 = Color3.new(1, 1, 1)
+SmoothnessBox.TextSize = 20
+
+ToggleAimbotButton.Name = "ToggleAimbotButton"
+ToggleAimbotButton.Parent = MainFrame
+ToggleAimbotButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleAimbotButton.Size = UDim2.new(0, 140, 0, 30)
+ToggleAimbotButton.Position = UDim2.new(0, 160, 0, 290)
+ToggleAimbotButton.Font = Enum.Font.SourceSans
+ToggleAimbotButton.Text = "Aimbot: Off"
+ToggleAimbotButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleAimbotButton.TextSize = 20
+
+ToggleAimModeButton.Name = "ToggleAimModeButton"
+ToggleAimModeButton.Parent = MainFrame
+ToggleAimModeButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleAimModeButton.Size = UDim2.new(0, 140, 0, 30)
+ToggleAimModeButton.Position = UDim2.new(0, 10, 0, 330)
+ToggleAimModeButton.Font = Enum.Font.SourceSans
+ToggleAimModeButton.Text = "Aim Mode: Hold"
+ToggleAimModeButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleAimModeButton.TextSize = 20
+
+ToggleAimbotModeButton.Name = "ToggleAimbotModeButton"
+ToggleAimbotModeButton.Parent = MainFrame
+ToggleAimbotModeButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+ToggleAimbotModeButton.Size = UDim2.new(0, 140, 0, 30)
+ToggleAimbotModeButton.Position = UDim2.new(0, 160, 0, 330)
+ToggleAimbotModeButton.Font = Enum.Font.SourceSans
+ToggleAimbotModeButton.Text = "Aimbot Mode: Smooth"
+ToggleAimbotModeButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleAimbotModeButton.TextSize = 20
+
+-- Function to get torso for body shots in R6 and R15 models
+local function getBodyWithOffset(character, useHeadOffset)
+    local offset = Vector3.new(0, useHeadOffset and 1.5 or 0, 0) -- Offset for head targeting
+    
+    -- Try to get UpperTorso first (R15)
+    local upperTorso = character:FindFirstChild("UpperTorso")
+    if upperTorso then
+        return upperTorso, upperTorso.Position + offset
+    end
+    
+    -- Then try Torso (R6)
+    local torso = character:FindFirstChild("Torso")
+    if torso then
+        return torso, torso.Position + offset
+    end
+    
+    -- Finally, fall back to HumanoidRootPart
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if humanoidRootPart then
+        return humanoidRootPart, humanoidRootPart.Position + offset
+    end
+    
+    return nil, nil
+end
+
+-- Function to get head for headshots in R6 and R15 models
+local function getHead(character)
+    -- Method 1: Direct part search with multiple naming conventions
+    local headParts = {
+        character:FindFirstChild("NewHead"),
+        character:FindFirstChild("Head"),
+        character:FindFirstChild("head")
+    }
+    
+    for _, head in ipairs(headParts) do
+        if head then return head end
+    end
+    
+    -- Method 2: Search through character descendants
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and 
+           (part.Name:lower():match("head") or 
+            part.Name:lower():match("skull") or 
+            part.Name:lower():match("cranium")) then
+            return part
+        end
+    end
+    
+    -- Method 3: Try to find head through humanoid
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        local head = humanoid:GetTargetPointAttachment()
+        if head then
+            return head.Parent
+        end
+    end
+    
+    -- Method 4: Search for head through R15 rig
+    if character:FindFirstChild("UpperTorso") then -- R15 check
+        local neck = character:FindFirstChild("Neck", true) -- recursive search
+        if neck and neck:IsA("Motor6D") then
+            return neck.Part1
+        end
+    end
+    
+    -- Fallback: Return any part named remotely like a head
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and 
+           (part.Name:lower():find("head") or 
+            part.Name:lower():find("skull") or 
+            part.Name:lower():find("brain")) then
+            return part
+        end
+    end
+    
+    return nil
+end
+
+-- Function to check if a target is visible (no walls)
+local function isVisible(target)
+    local origin = Camera.CFrame.Position
+    local direction = (target.Position - origin).unit * (target.Position - origin).Magnitude
+    local ray = Ray.new(origin, direction)
+    
+    -- Create a table of parts to ignore
+    local ignoreList = {LocalPlayer.Character}
+    if target.Parent then
+        table.insert(ignoreList, target.Parent)
+    end
+    
+    local hit, pos = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    return hit == nil or hit:IsDescendantOf(target.Parent)
+end
+
+local function createPlayerButton(playerName)
+    if not playerName then return nil end -- Add nil check
+    
+    local button = Instance.new("TextButton")
+    button.Name = playerName .. "Button"
+    button.Size = UDim2.new(1, -10, 0, 25)
+    button.Position = UDim2.new(0, 5, 0, 0)
+    button.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+    button.Text = playerName .. (Friends[playerName] and " (Friend)" or "")
+    button.TextColor3 = Friends[playerName] and Color3.new(0, 1, 0) or Color3.new(1, 1, 1)
+    button.TextSize = 14
+    button.Font = Enum.Font.SourceSans
+    button.AutoButtonColor = true -- Add hover effect
+    button.Parent = PlayerScrollingFrame
+    
+    -- Add hover effect
+    local originalColor = button.BackgroundColor3
+    button.MouseEnter:Connect(function()
+        button.BackgroundColor3 = Color3.new(0.4, 0.4, 0.4)
+    end)
+    button.MouseLeave:Connect(function()
+        button.BackgroundColor3 = originalColor
+    end)
+    
+    button.MouseButton1Click:Connect(function()
+        if Friends[playerName] then
+            Friends[playerName] = nil
+            button.Text = playerName
+            button.TextColor3 = Color3.new(1, 1, 1)
+        else
+            Friends[playerName] = true
+            button.Text = playerName .. " (Friend)"
+            button.TextColor3 = Color3.new(0, 1, 0)
+        end
+    end)
+    
+    return button
+end
+
+-- Function to refresh the player list
+local function refreshPlayerList()
+    StatusLabel.Visible = true
+    StatusLabel.Text = "Refreshing player list..."
+    
+    -- Clear existing buttons
+    for _, child in pairs(PlayerScrollingFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    -- Add buttons for all players
+    local playerButtons = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            pcall(function()
+                local button = createPlayerButton(player.Name)
+                table.insert(playerButtons, button)
+            end)
+        end
+    end
+    
+    -- Update canvas size
+    local totalHeight = #playerButtons * 27
+    PlayerScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, math.max(totalHeight, PlayerScrollingFrame.AbsoluteSize.Y))
+    
+    StatusLabel.Text = #playerButtons > 0 and "" or "No other players in server"
+    StatusLabel.Visible = #playerButtons == 0
+end
+
+-- Connect refresh button
+RefreshButton.MouseButton1Click:Connect(refreshPlayerList)
+
+-- Connect player added/removed events
+Players.PlayerAdded:Connect(function(player)
+    wait() -- Wait for player to fully load
+    refreshPlayerList()
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    wait() -- Wait for player to fully remove
+    refreshPlayerList()
+end)
+
+-- Initial refresh
+refreshPlayerList()
+
+-- Function to check if a player is on the same team
+local function isTeammate(player)
+    return player.Team == LocalPlayer.Team
+end
+
+-- Function to find the closest player's target part with improved precision, updating on respawn
+local function getClosestPlayer()
+    local closestTarget = nil
+    local closestPosition = nil
+    local RequiredDistance = FOV
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and not Friends[player.Name] and (not TeamCheckEnabled or not isTeammate(player)) then
+            local character = player.Character
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            
+            if humanoid and humanoid.Health > 0 then
+                local targetPart, targetPosition
+                
+                -- Always get torso but with head offset when targeting head
+                targetPart, targetPosition = getBodyWithOffset(character, TargetPart == "Head")
+                
+                if targetPart then
+                    if not WallCheckEnabled or isVisible(targetPart) then
+                        local Vector, OnScreen = Camera:WorldToViewportPoint(targetPosition)
+                        
+                        if OnScreen then
+                            local Distance = (Vector2.new(Mouse.X, Mouse.Y) - Vector2.new(Vector.X, Vector.Y)).Magnitude
+                            
+                            if Distance < RequiredDistance then
+                                RequiredDistance = Distance
+                                closestTarget = targetPart
+                                closestPosition = targetPosition
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closestTarget, closestPosition
+end
+
+-- Aimbot Function
+local function aimAtTarget()
+    local target, targetPosition = getClosestPlayer()
+    
+    if target and targetPosition then
+        FOVCircle.Color = Color3.fromRGB(255, 70, 70)  -- Change color when targeting
+        
+        -- Check if target's humanoid is still alive
+        local humanoid = target.Parent:FindFirstChild("Humanoid")
+        if humanoid and humanoid.Health <= 0 then
+            return
+        end
+        
+        if AimbotMode == "Instant" then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPosition)
+        elseif AimbotMode == "Smooth" then
+            if (targetPosition - Camera.CFrame.Position).Magnitude <= 1000 then
+                Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, targetPosition), Smoothness)
+            end
+        end
+    else
+        FOVCircle.Color = Color3.fromRGB(255, 255, 255)  -- Reset color when not targeting
+    end
+end
+
+-- FOV Box
+FOVBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local fovValue = tonumber(FOVBox.Text)
+        if fovValue then
+            -- Clamp FOV value between 10 and 800
+            fovValue = math.clamp(fovValue, 10, 800)
+            FOV = fovValue
+            FOVBox.PlaceholderText = "FOV: " .. FOV
+            FOVBox.Text = ""
+        else
+            FOVBox.Text = ""
+        end
+    end
+end)
+
+-- Toggle Aimbot on right click hold
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        -- Handle aim mode
+        if AimMode == "Hold" then
+            AimEnabled = true
+        elseif AimMode == "Toggle" then
+            AimEnabled = not AimEnabled
+            ToggleAimbotButton.Text = "Aimbot: " .. (AimEnabled and "On" or "Off")
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 and AimMode == "Hold" then
+        AimEnabled = false
+    end
+end)
+
+-- Toggle Body/Head Button
+ToggleBodyHeadButton.MouseButton1Click:Connect(function()
+    if TargetPart == "Head" then
+        TargetPart = "Body"
+        ToggleBodyHeadButton.Text = "Target: Body"
+    else
+        TargetPart = "Head" -- This will now check for NewHead first, then Head
+        ToggleBodyHeadButton.Text = "Target: Head"
+    end
+end)
+
+-- Toggle FOV Circle Button
+ToggleFOVCircleButton.MouseButton1Click:Connect(function()
+    ShowFOV = not ShowFOV
+    FOVCircle.Visible = ShowFOV
+    ToggleFOVCircleButton.Text = "Show FOV: " .. (ShowFOV and "On" or "Off")
+end)
+
+-- Toggle Wall Check Button
+ToggleWallCheckButton.MouseButton1Click:Connect(function()
+    WallCheckEnabled = not WallCheckEnabled
+    ToggleWallCheckButton.Text = "Wall Check: " .. (WallCheckEnabled and "Enabled" or "Disabled")
+end)
+
+-- Toggle Team Check Button
+ToggleTeamCheckButton.MouseButton1Click:Connect(function()
+    TeamCheckEnabled = not TeamCheckEnabled
+    ToggleTeamCheckButton.Text = "Team Check: " .. (TeamCheckEnabled and "Enabled" or "Disabled")
+end)
+
+-- Smoothness Box
+SmoothnessBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local smoothnessValue = tonumber(SmoothnessBox.Text)
+        if smoothnessValue and smoothnessValue >= 0 and smoothnessValue <= 1 then
+            Smoothness = smoothnessValue
+            SmoothnessBox.PlaceholderText = "Smoothness: " .. Smoothness
+            SmoothnessBox.Text = ""
+        else
+            SmoothnessBox.Text = ""
+        end
+    end
+end)
+
+-- Toggle Aimbot Button
+ToggleAimbotButton.MouseButton1Click:Connect(function()
+    AimEnabled = not AimEnabled
+    ToggleAimbotButton.Text = "Aimbot: " .. (AimEnabled and "On" or "Off")
+end)
+
+-- Toggle Aim Mode Button
+ToggleAimModeButton.MouseButton1Click:Connect(function()
+    if AimMode == "Hold" then
+        AimMode = "Toggle"
+        ToggleAimModeButton.Text = "Aim Mode: Toggle"
+    else
+        AimMode = "Hold"
+        ToggleAimModeButton.Text = "Aim Mode: Hold"
+    end
+end)
+
+-- Toggle Aimbot Mode Button
+ToggleAimbotModeButton.MouseButton1Click:Connect(function()
+    if AimbotMode == "Smooth" then
+        AimbotMode = "Instant"
+        ToggleAimbotModeButton.Text = "Aimbot Mode: Instant"
+    else
+        AimbotMode = "Smooth"
+        ToggleAimbotModeButton.Text = "Aimbot Mode: Smooth"
+    end
+end)
+
+-- Minimize Button
+MinimizeButton.MouseButton1Click:Connect(function()
+    GUIEnabled = not GUIEnabled
+    for _, child in pairs(MainFrame:GetChildren()) do
+        if child ~= Title and child ~= MinimizeButton then
+            child.Visible = GUIEnabled
+        end
+    end
+    MainFrame.Size = UDim2.new(0, 300, 0, GUIEnabled and 420 or 30)
+    MinimizeButton.Text = GUIEnabled and "-" or "+"
+    FOVCircle.Visible = GUIEnabled and ShowFOV
+end)
+
+-- Run Aimbot every frame
+RunService.RenderStepped:Connect(function()
+    if ShowFOV and GUIEnabled then
+        FOVCircle.Radius = FOV
+        FOVCircle.Visible = true
+        
+        -- Always position FOV circle at center
+        FOVCircle.Position = Vector2.new(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+    else
+        FOVCircle.Visible = false
+    end
+    
+    if AimEnabled then
+        aimAtTarget()
+    end
+end)
+
+Camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateCenter)
+
+
+-- Cleanup
+game:GetService("CoreGui").ChildRemoved:Connect(function(child)
+    if child == ScreenGui then
+        FOVCircle:Remove()
+    end
+end)
+
+game:GetService("CoreGui").ChildRemoved:Connect(function(child)
+    if child == ScreenGui then
+        FOVCircle:Remove()
+        -- Clear friends list
+        table.clear(Friends)
+    end
+end)
+
+-- Notify the user that the script has loaded
+print("Enhanced Aimbot script with GUI loaded successfully.")
