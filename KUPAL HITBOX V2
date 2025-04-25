@@ -383,7 +383,7 @@ UserInputService.InputChanged:Connect(function(input)
         )
         
         SliderFill.Size = UDim2.new(sliderPosition, 0, 1, 0)
-        local newSize = math.floor(5 + (sliderPosition * 15))
+        local newSize = math.floor(3 + (sliderPosition * 27))
         hitboxSize = Vector3.new(newSize, newSize, newSize)
         SizeLabel.Text = "Hitbox Size: " .. newSize
         
