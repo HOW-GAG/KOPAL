@@ -1,0 +1,296 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+
+
+-- Create ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CustomFeatureGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+
+-- Create main frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 200, 0, 110)
+MainFrame.Position = UDim2.new(0.8, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+-- Create title
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+Title.BorderSizePixel = 0
+Title.Text = "Custom Features"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 16
+Title.Font = Enum.Font.SourceSansBold
+Title.Parent = MainFrame
+
+-- Create Fullbright button
+local FBButton = Instance.new("TextButton")
+FBButton.Name = "FullbrightButton"
+FBButton.Size = UDim2.new(0.8, 0, 0, 30)
+FBButton.Position = UDim2.new(0.1, 0, 0.35, 0)
+FBButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+FBButton.BorderColor3 = Color3.fromRGB(60, 60, 60)
+FBButton.Text = "Fullbright: OFF"
+FBButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+FBButton.TextSize = 14
+FBButton.Font = Enum.Font.SourceSans
+FBButton.Parent = MainFrame
+
+-- Create ESP button
+local ESPButton = Instance.new("TextButton")
+ESPButton.Name = "ESPButton"
+ESPButton.Size = UDim2.new(0.8, 0, 0, 30)
+ESPButton.Position = UDim2.new(0.1, 0, 0.7, 0)
+ESPButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+ESPButton.BorderColor3 = Color3.fromRGB(60, 60, 60)
+ESPButton.Text = "ESP: OFF"
+ESPButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ESPButton.TextSize = 14
+ESPButton.Font = Enum.Font.SourceSans
+ESPButton.Parent = MainFrame
+
+-- Variables
+local camera = workspace.CurrentCamera
+local localPlayer = Players.LocalPlayer
+local espEnabled = false
+local fullbrightEnabled = false
+local espObjects = {}
+
+-- Original lighting settings
+local originalSettings = {
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    FogEnd = Lighting.FogEnd,
+    GlobalShadows = Lighting.GlobalShadows,
+    Ambient = Lighting.Ambient,
+    OutdoorAmbient = Lighting.OutdoorAmbient
+}
+
+-- ESP Functions
+local function createESPObject()
+    local esp = {
+        outline = Drawing.new("Square"),
+        fill = Drawing.new("Square"),
+        name = Drawing.new("Text")
+    }
+    
+    -- Main body fill
+    esp.fill.Thickness = 1
+    esp.fill.Color = Color3.fromRGB(255, 0, 0)
+    esp.fill.Filled = true
+    esp.fill.Transparency = 0.3
+    esp.fill.Visible = false
+    
+    -- Outline
+    esp.outline.Thickness = 2
+    esp.outline.Color = Color3.fromRGB(255, 0, 0)
+    esp.outline.Filled = false
+    esp.outline.Transparency = 1
+    esp.outline.Visible = false
+    
+    -- Name tag
+    esp.name.Size = 16
+    esp.name.Center = true
+    esp.name.Color = Color3.fromRGB(255, 255, 255)
+    esp.name.Outline = true
+    esp.name.OutlineColor = Color3.new(0, 0, 0)
+    esp.name.Visible = false
+    
+    return esp
+end
+
+local FIXED_ESP_HEIGHT = 40  -- Adjust this value for desired height
+local FIXED_ESP_WIDTH = 20   -- Adjust this value for desired width
+
+local function calculateESPBounds(character)
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return nil end
+    
+    local rootPos = humanoidRootPart.Position
+    local screenPos = camera:WorldToViewportPoint(rootPos)
+    
+    -- Only proceed if the character is in front of the camera
+    if screenPos.Z <= 0 then return nil end
+    
+    -- Calculate distance and inverse the scaling
+    local distance = (camera.CFrame.Position - rootPos).Magnitude
+    local scale = math.clamp(100 / distance, 0.3, 2.5)  -- Adjusted scaling formula
+    
+    -- Base size for ESP box
+    local baseHeight = 60
+    local baseWidth = 40
+    
+    -- Calculate dimensions with corrected distance scaling
+    local boxHeight = baseHeight * scale
+    local boxWidth = baseWidth * scale
+    
+    -- Set maximum sizes to prevent boxes from getting too large
+    boxHeight = math.min(boxHeight, 100)  -- Maximum height
+    boxWidth = math.min(boxWidth, 60)    -- Maximum width
+    
+    -- Set minimum sizes to prevent boxes from getting too small
+    boxHeight = math.max(boxHeight, 30)  -- Minimum height
+    boxWidth = math.max(boxWidth, 20)    -- Minimum width
+    
+    return {
+        bodyCenter = Vector2.new(screenPos.X, screenPos.Y),
+        bodySize = Vector2.new(boxWidth, boxHeight),
+        isVisible = true,
+        textSize = math.clamp(14 * scale, 12, 16)  -- Scale text size with distance
+    }
+end
+
+-- Update ESP function
+local function updateESP()
+    for player, esp in pairs(espObjects) do
+        if player.Character and player ~= localPlayer then
+            local character = player.Character
+            local humanoid = character:FindFirstChild("Humanoid")
+            
+            if humanoid and humanoid.Health > 0 then
+                local bounds = calculateESPBounds(character)
+                
+                if bounds then
+                    -- Update body
+                    esp.fill.Visible = espEnabled
+                    esp.fill.Position = bounds.bodyCenter - bounds.bodySize/2
+                    esp.fill.Size = bounds.bodySize
+                    
+                    esp.outline.Visible = espEnabled
+                    esp.outline.Position = esp.fill.Position
+                    esp.outline.Size = esp.fill.Size
+                    
+                    -- Update name tag
+                    esp.name.Visible = espEnabled
+                    esp.name.Position = Vector2.new(bounds.bodyCenter.X, bounds.bodyCenter.Y - bounds.bodySize.Y/2 - 20)
+                    esp.name.Text = player.Name
+                    esp.name.Size = bounds.textSize
+                    
+                    -- Update colors based on team
+                    local espColor = player.Team == localPlayer.Team 
+                        and Color3.fromRGB(0, 255, 0)  -- Green for teammates
+                        or Color3.fromRGB(255, 0, 0)   -- Red for enemies
+                    
+                    esp.fill.Color = espColor
+                    esp.outline.Color = espColor
+                else
+                    esp.fill.Visible = false
+                    esp.outline.Visible = false
+                    esp.name.Visible = false
+                end
+            else
+                esp.fill.Visible = false
+                esp.outline.Visible = false
+                esp.name.Visible = false
+            end
+        end
+    end
+end
+
+local function cleanupESP(esp)
+    esp.fill:Remove()
+    esp.outline:Remove()
+    esp.name:Remove()
+end
+
+-- Fullbright Functions
+local function enableFullbright()
+    Lighting.Brightness = 2
+    Lighting.ClockTime = 14
+    Lighting.FogEnd = 100000
+    Lighting.GlobalShadows = false
+    Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+    Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+end
+
+local function disableFullbright()
+    Lighting.Brightness = originalSettings.Brightness
+    Lighting.ClockTime = originalSettings.ClockTime
+    Lighting.FogEnd = originalSettings.FogEnd
+    Lighting.GlobalShadows = originalSettings.GlobalShadows
+    Lighting.Ambient = originalSettings.Ambient
+    Lighting.OutdoorAmbient = originalSettings.OutdoorAmbient
+end
+
+-- Button Functions
+FBButton.MouseButton1Click:Connect(function()
+    fullbrightEnabled = not fullbrightEnabled
+    FBButton.Text = "Fullbright: " .. (fullbrightEnabled and "ON" or "OFF")
+    FBButton.BackgroundColor3 = fullbrightEnabled and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(50, 50, 50)
+    
+    if fullbrightEnabled then
+        enableFullbright()
+    else
+        disableFullbright()
+    end
+end)
+
+ESPButton.MouseButton1Click:Connect(function()
+    espEnabled = not espEnabled
+    ESPButton.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
+    ESPButton.BackgroundColor3 = espEnabled and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(50, 50, 50)
+    
+    for _, esp in pairs(espObjects) do
+        esp.fill.Visible = espEnabled
+        esp.outline.Visible = espEnabled
+        esp.name.Visible = espEnabled
+    end
+end)
+
+-- Initialize ESP for existing players
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= localPlayer then
+        espObjects[player] = createESPObject()
+    end
+end
+
+-- Handle new players
+Players.PlayerAdded:Connect(function(player)
+    if player ~= localPlayer then
+        espObjects[player] = createESPObject()
+    end
+end)
+
+-- Clean up when players leave
+Players.PlayerRemoving:Connect(function(player)
+    if espObjects[player] then
+        cleanupESP(espObjects[player])
+        espObjects[player] = nil
+    end
+end)
+
+-- Update ESP
+RunService.RenderStepped:Connect(function()
+    if espEnabled then
+        updateESP()
+    end
+end)
+
+-- Maintain Fullbright
+RunService.RenderStepped:Connect(function()
+    if fullbrightEnabled then
+        enableFullbright()
+    end
+end)
+
+-- Clean up when script is destroyed
+ScreenGui:GetPropertyChangedSignal("Parent"):Connect(function()
+    if not ScreenGui.Parent then
+        for _, esp in pairs(espObjects) do
+            cleanupESP(esp)
+        end
+        if fullbrightEnabled then
+            disableFullbright()
+        end
+    end
+end)
