@@ -266,6 +266,7 @@ end
 local function getClosestPlayer()
     local closestPlayer = nil
     local shortestDistance = math.huge
+    local mousePos = UserInputService:GetMouseLocation()
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= localPlayer and not Friends[player.Name] and player.Character then
@@ -278,10 +279,20 @@ local function getClosestPlayer()
                 local screenPos, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
 
                 if onScreen and isTargetVisible(character) then
-                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)).Magnitude
+                    -- Calculate distance from mouse position instead of screen center
+                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
                     if distance < FOV_RADIUS and distance < shortestDistance then
-                        closestPlayer = player
-                        shortestDistance = distance
+                        -- Additional checks for better target selection
+                        local _, onScreen = Camera:WorldToViewportPoint(
+                            targetMode == "Head" 
+                            and character:FindFirstChild("Head").Position 
+                            or humanoidRootPart.Position
+                        )
+                        
+                        if onScreen then
+                            closestPlayer = player
+                            shortestDistance = distance
+                        end
                     end
                 end
             end
@@ -304,22 +315,43 @@ local function aimAtTarget()
         if targetPart then
             local screenPos = Camera:WorldToViewportPoint(targetPart.Position)
             
-            -- Only aim if target is on screen
+            -- Only aim if target is on screen and in front of the camera
             if screenPos.Z > 0 then
-                local targetX = screenPos.X - Camera.ViewportSize.X / 2
-                local targetY = screenPos.Y - Camera.ViewportSize.Y / 2
+                -- Get current mouse position
+                local mousePos = UserInputService:GetMouseLocation()
+                
+                -- Calculate the difference between target and current mouse position
+                local targetX = screenPos.X - mousePos.X
+                local targetY = screenPos.Y - mousePos.Y
+                
+                -- Add prediction and smoothing
+                local predictionFactor = 0.1 -- Adjust this value for better prediction
+                local velocityX = targetPart.AssemblyLinearVelocity.X * predictionFactor
+                local velocityY = targetPart.AssemblyLinearVelocity.Y * predictionFactor
+                
+                targetX = targetX + velocityX
+                targetY = targetY + velocityY
                 
                 -- Add bounds checking to prevent extreme movements
-                local maxMove = 100 -- Maximum pixels to move per frame
+                local maxMove = FOV_RADIUS * 0.5 -- Maximum movement based on FOV
                 targetX = math.clamp(targetX, -maxMove, maxMove)
                 targetY = math.clamp(targetY, -maxMove, maxMove)
                 
                 if smoothingEnabled then
-                    local smoothX = targetX * smoothingValue
-                    local smoothY = targetY * smoothingValue
-                    mousemoverel(smoothX, smoothY)
+                    -- Improved smoothing calculation
+                    local smoothness = math.clamp(smoothingValue, 0.01, 1)
+                    local smoothX = targetX * smoothness
+                    local smoothY = targetY * smoothness
+                    
+                    -- Apply movement only if it's significant enough
+                    if math.abs(smoothX) > 0.1 or math.abs(smoothY) > 0.1 then
+                        mousemoverel(smoothX, smoothY)
+                    end
                 else
-                    mousemoverel(targetX, targetY)
+                    -- Apply movement only if it's significant enough
+                    if math.abs(targetX) > 0.1 or math.abs(targetY) > 0.1 then
+                        mousemoverel(targetX, targetY)
+                    end
                 end
             end
         end
@@ -474,17 +506,9 @@ RunService.RenderStepped:Connect(function()
     fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     fovCircle.Radius = FOV_RADIUS
     
-    -- Check if current target is dead
-    if targetPlayer and targetPlayer.Character then
-        local humanoid = targetPlayer.Character:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then
-            targetPlayer = nil
-        end
-    end
-    
     if holdToAim then
         -- Hold mode
-        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then -- Right mouse button
             targetPlayer = getClosestPlayer()
             if targetPlayer then aimAtTarget() end
         else
