@@ -1,0 +1,205 @@
+-- Create main GUI elements
+local ScreenGui = Instance.new("ScreenGui")
+local MainFrame = Instance.new("Frame")
+local TitleBar = Instance.new("Frame")
+local Title = Instance.new("TextLabel")
+local MinimizeButton = Instance.new("TextButton")
+local RebirthButton = Instance.new("TextButton")
+local AscendButton = Instance.new("TextButton")
+local PowerButton = Instance.new("TextButton")
+local TimeLabel = Instance.new("TextLabel")
+local UserLabel = Instance.new("TextLabel")
+
+-- Set up the ScreenGui
+ScreenGui.Name = "AutoRebirthGUI"
+ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+-- Main frame configuration
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+MainFrame.BorderSizePixel = 0
+MainFrame.Position = UDim2.new(0.8, 0, 0.5, 0)
+MainFrame.Size = UDim2.new(0, 200, 0, 160)
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+local ButtonContainer = Instance.new("Frame")
+ButtonContainer.Name = "ButtonContainer"
+ButtonContainer.Parent = MainFrame
+ButtonContainer.BackgroundTransparency = 1
+ButtonContainer.Position = UDim2.new(0, 0, 0, 30)
+ButtonContainer.Size = UDim2.new(1, 0, 1, -30)
+
+local PowerInput = Instance.new("TextBox")
+PowerInput.Name = "PowerInput"
+PowerInput.Parent = ButtonContainer
+PowerInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+PowerInput.BorderSizePixel = 0
+PowerInput.Position = UDim2.new(0.5, -40, 0.65, -10)
+PowerInput.Size = UDim2.new(0, 80, 0, 20)
+PowerInput.Font = Enum.Font.SourceSans
+PowerInput.PlaceholderText = "Enter Power"
+PowerInput.Text = ""
+PowerInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+PowerInput.TextSize = 14
+PowerInput.ClearTextOnFocus = true
+
+-- Title bar configuration
+TitleBar.Name = "TitleBar"
+TitleBar.Parent = MainFrame
+TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TitleBar.BorderSizePixel = 0
+TitleBar.Size = UDim2.new(1, 0, 0, 30)
+
+-- Title text configuration
+Title.Name = "Title"
+Title.Parent = TitleBar
+Title.BackgroundTransparency = 1
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.Size = UDim2.new(0.7, 0, 1, 0)
+Title.Font = Enum.Font.SourceSansBold
+Title.Text = "Kupal Highest Auto"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 18
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Minimize button configuration
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Parent = TitleBar
+MinimizeButton.BackgroundTransparency = 1
+MinimizeButton.Position = UDim2.new(1, -25, 0, 0)
+MinimizeButton.Size = UDim2.new(0, 25, 1, 0)
+MinimizeButton.Font = Enum.Font.SourceSansBold
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.TextSize = 20
+
+-- Rebirth button configuration
+RebirthButton.Name = "RebirthButton"
+RebirthButton.Parent = ButtonContainer
+RebirthButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+RebirthButton.BorderSizePixel = 0
+RebirthButton.Position = UDim2.new(0.5, -40, 0.13, -10)
+RebirthButton.Size = UDim2.new(0, 80, 0, 30)
+RebirthButton.Font = Enum.Font.SourceSansBold
+RebirthButton.Text = "Auto Rebirth"
+RebirthButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+RebirthButton.TextSize = 14
+
+-- Ascend Button configuration
+AscendButton.Name = "AscendButton"
+AscendButton.Parent = ButtonContainer
+AscendButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+AscendButton.BorderSizePixel = 0
+AscendButton.Position = UDim2.new(0.5, -40, 0.40, -10)
+AscendButton.Size = UDim2.new(0, 80, 0, 30)
+AscendButton.Font = Enum.Font.SourceSansBold
+AscendButton.Text = "Auto Ascend"
+AscendButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+AscendButton.TextSize = 14
+
+-- Power Button configuration
+PowerButton.Name = "PowerButton"
+PowerButton.Parent = ButtonContainer
+PowerButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+PowerButton.BorderSizePixel = 0
+PowerButton.Position = UDim2.new(0.5, -40, 0.65, 15)
+PowerButton.Size = UDim2.new(0, 80, 0, 25)
+PowerButton.Font = Enum.Font.SourceSansBold
+PowerButton.Text = "Set Power"
+PowerButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+PowerButton.TextSize = 16
+
+-- Variables
+local minimized = false
+local rebirthRunning = false
+local ascendRunning = false
+local rebirthEvent = game:GetService("ReplicatedStorage").Events.Rebirth
+local ascendEvent = game:GetService("ReplicatedStorage").Events.Ascend
+
+-- Minimize button functionality
+MinimizeButton.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        MainFrame.Size = UDim2.new(0, 200, 0, 30)
+        MinimizeButton.Text = "+"
+        ButtonContainer.Visible = false
+    else
+        MainFrame.Size = UDim2.new(0, 200, 0, 180) -- Slightly increased for new input field
+        MinimizeButton.Text = "-"
+        ButtonContainer.Visible = true
+    end
+end)
+
+-- Rebirth button functionality
+RebirthButton.MouseButton1Click:Connect(function()
+    rebirthRunning = not rebirthRunning
+    if rebirthRunning then
+        RebirthButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+    else
+        RebirthButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    updateStatus()
+end)
+
+-- Ascend button functionality
+AscendButton.MouseButton1Click:Connect(function()
+    ascendRunning = not ascendRunning
+    if ascendRunning then
+        AscendButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+    else
+        AscendButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    updateStatus()
+end)
+
+-- Power button functionality
+PowerButton.MouseButton1Click:Connect(function()
+    local player = game:GetService("Players").LocalPlayer
+    if player and player.leaderstats and player.leaderstats.Power then
+        local inputValue = tonumber(PowerInput.Text)
+        if inputValue then
+            player.leaderstats.Power.Value = inputValue
+            PowerButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+            PowerButton.Text = "Power Set!"
+            wait(1)
+            PowerButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            PowerButton.Text = "Set Power"
+        else
+            PowerButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+            PowerButton.Text = "Invalid Input"
+            wait(1)
+            PowerButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            PowerButton.Text = "Set Power"
+        end
+    end
+end)
+
+-- Input validation
+PowerInput.FocusLost:Connect(function(enterPressed)
+    local inputValue = PowerInput.Text
+    if not tonumber(inputValue) then
+        PowerInput.Text = ""
+        PowerInput.PlaceholderText = "Invalid number"
+        wait(1)
+        PowerInput.PlaceholderText = "Enter Power"
+    end
+end)
+
+-- Auto rebirth and ascend loop
+spawn(function()
+    while wait(0.1) do  -- Adjust this delay as needed
+        if rebirthRunning then
+            pcall(function()
+                rebirthEvent:FireServer()
+            end)
+        end
+        if ascendRunning then
+            pcall(function()
+                ascendEvent:FireServer()
+            end)
+        end
+    end
+end)
