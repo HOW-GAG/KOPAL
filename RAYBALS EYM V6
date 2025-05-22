@@ -1,0 +1,547 @@
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+
+-- Variables
+local localPlayer = Players.LocalPlayer
+local targetPlayer = nil
+local aimLockEnabled = false
+local fovCircleVisible = true
+local holdToAim = false
+local wallCheckEnabled = true
+local smoothingEnabled = true
+local smoothingValue = 0.2
+local Friends = {}
+local targetMode = "Head"
+local isMinimized = false
+local lastTargetSwitchTime = 0
+local targetSwitchCooldown = 0.1
+
+-- Create ScreenGui with protection
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AimAssistGui"
+ScreenGui.ResetOnSpawn = false
+
+local function protectGui()
+    if syn and syn.protect_gui then
+        syn.protect_gui(ScreenGui)
+        ScreenGui.Parent = game:GetService("CoreGui")
+    elseif gethui then
+        ScreenGui.Parent = gethui()
+    elseif game:GetService("CoreGui"):FindFirstChild("RobloxGui") then
+        ScreenGui.Parent = game:GetService("CoreGui").RobloxGui
+    else
+        ScreenGui.Parent = game:GetService("CoreGui")
+    end
+end
+
+-- Protect and parent the GUI
+pcall(protectGui)
+
+-- Create main frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 200, 0, 450)
+MainFrame.Position = UDim2.new(0.8, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+-- Create title
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+Title.BorderSizePixel = 0
+Title.Text = "RAYBALS KUPAL"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 16
+Title.Font = Enum.Font.SourceSansBold
+Title.Parent = MainFrame
+
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Position = UDim2.new(1, -30, 0, 0)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.TextSize = 20
+MinimizeButton.Font = Enum.Font.SourceSansBold
+MinimizeButton.Parent = MainFrame
+
+-- Create Aim Lock button
+local AimLockButton = Instance.new("TextButton")
+AimLockButton.Name = "AimLockButton"
+AimLockButton.Size = UDim2.new(0.8, 0, 0, 30)
+AimLockButton.Position = UDim2.new(0.1, 0, 0.09, 0)
+AimLockButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+AimLockButton.BorderColor3 = Color3.fromRGB(60, 60, 60)
+AimLockButton.Text = "Aim Lock: OFF"
+AimLockButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+AimLockButton.TextSize = 14
+AimLockButton.Font = Enum.Font.SourceSans
+AimLockButton.Parent = MainFrame
+
+-- Create Aim Mode button
+local AimModeButton = Instance.new("TextButton")
+AimModeButton.Name = "AimModeButton"
+AimModeButton.Size = UDim2.new(0.8, 0, 0, 30)
+AimModeButton.Position = UDim2.new(0.1, 0, 0.17, 0)
+AimModeButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+AimModeButton.BorderColor3 = Color3.fromRGB(60, 60, 60)
+AimModeButton.Text = "Mode: Toggle"
+AimModeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+AimModeButton.TextSize = 14
+AimModeButton.Font = Enum.Font.SourceSans
+AimModeButton.Parent = MainFrame
+
+local TargetModeButton = Instance.new("TextButton")
+TargetModeButton.Name = "TargetModeButton"
+TargetModeButton.Size = UDim2.new(0.8, 0, 0, 30)
+TargetModeButton.Position = UDim2.new(0.1, 0, 0.63, 0)
+TargetModeButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+TargetModeButton.BorderColor3 = Color3.fromRGB(60, 60, 60)
+TargetModeButton.Text = "Target: Head"
+TargetModeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+TargetModeButton.TextSize = 14
+TargetModeButton.Font = Enum.Font.SourceSans
+TargetModeButton.Parent = MainFrame
+
+-- Create Wall Check button
+local WallCheckButton = Instance.new("TextButton")
+WallCheckButton.Name = "WallCheckButton"
+WallCheckButton.Size = UDim2.new(0.8, 0, 0, 30)
+WallCheckButton.Position = UDim2.new(0.1, 0, 0.25, 0)
+WallCheckButton.BackgroundColor3 = Color3.fromRGB(0, 120, 0)
+WallCheckButton.BorderColor3 = Color3.fromRGB(60, 60, 60)
+WallCheckButton.Text = "Wall Check: ON"
+WallCheckButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+WallCheckButton.TextSize = 14
+WallCheckButton.Font = Enum.Font.SourceSans
+WallCheckButton.Parent = MainFrame
+
+-- Create FOV Circle Visibility button
+local FovCircleButton = Instance.new("TextButton")
+FovCircleButton.Name = "FovCircleButton"
+FovCircleButton.Size = UDim2.new(0.8, 0, 0, 30)
+FovCircleButton.Position = UDim2.new(0.1, 0, 0.33, 0)
+FovCircleButton.BackgroundColor3 = Color3.fromRGB(0, 120, 0)
+FovCircleButton.BorderColor3 = Color3.fromRGB(60, 60, 60)
+FovCircleButton.Text = "FOV Circle: ON"
+FovCircleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+FovCircleButton.TextSize = 14
+FovCircleButton.Font = Enum.Font.SourceSans
+FovCircleButton.Parent = MainFrame
+
+local FOVTextBox = Instance.new("TextBox")
+FOVTextBox.Name = "FOVTextBox"
+FOVTextBox.Size = UDim2.new(0.8, 0, 0, 25)
+FOVTextBox.Position = UDim2.new(0.1, 0, 0.49, 0)
+FOVTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+FOVTextBox.BorderColor3 = Color3.fromRGB(60, 60, 60)
+FOVTextBox.Text = "100"
+FOVTextBox.PlaceholderText = "Enter FOV (10-800)"
+FOVTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+FOVTextBox.TextSize = 14
+FOVTextBox.Font = Enum.Font.SourceSans
+FOVTextBox.Parent = MainFrame
+
+-- Create Smoothing button and slider
+local SmoothingButton = Instance.new("TextButton")
+SmoothingButton.Name = "SmoothingButton"
+SmoothingButton.Size = UDim2.new(0.8, 0, 0, 30)
+SmoothingButton.Position = UDim2.new(0.1, 0, 0.41, 0)
+SmoothingButton.BackgroundColor3 = Color3.fromRGB(0, 120, 0)
+SmoothingButton.BorderColor3 = Color3.fromRGB(60, 60, 60)
+SmoothingButton.Text = "Smoothing: ON"
+SmoothingButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+SmoothingButton.TextSize = 14
+SmoothingButton.Font = Enum.Font.SourceSans
+SmoothingButton.Parent = MainFrame
+
+local SmoothingTextBox = Instance.new("TextBox")
+SmoothingTextBox.Name = "SmoothingTextBox"
+SmoothingTextBox.Size = UDim2.new(0.8, 0, 0, 25)
+SmoothingTextBox.Position = UDim2.new(0.1, 0, 0.56, 0)
+SmoothingTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+SmoothingTextBox.BorderColor3 = Color3.fromRGB(60, 60, 60)
+SmoothingTextBox.Text = "0.2"
+SmoothingTextBox.PlaceholderText = "Enter Smoothing (0-1)"
+SmoothingTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SmoothingTextBox.TextSize = 14
+SmoothingTextBox.Font = Enum.Font.SourceSans
+SmoothingTextBox.Parent = MainFrame
+
+-- Create Player List Frame
+local PlayerListFrame = Instance.new("Frame")
+PlayerListFrame.Name = "PlayerListFrame"
+PlayerListFrame.Size = UDim2.new(0.8, 0, 0, 120)
+PlayerListFrame.Position = UDim2.new(0.1, 0, 0.71, 0)
+PlayerListFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+PlayerListFrame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+PlayerListFrame.Parent = MainFrame
+
+local PlayerScrollingFrame = Instance.new("ScrollingFrame")
+PlayerScrollingFrame.Name = "PlayerScrollingFrame"
+PlayerScrollingFrame.Size = UDim2.new(1, 0, 1, -30)
+PlayerScrollingFrame.Position = UDim2.new(0, 0, 0, 30)
+PlayerScrollingFrame.BackgroundTransparency = 0
+PlayerScrollingFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+PlayerScrollingFrame.BorderSizePixel = 0
+PlayerScrollingFrame.ScrollBarThickness = 6
+PlayerScrollingFrame.Parent = PlayerListFrame
+
+local PlayerListLayout = Instance.new("UIListLayout")
+PlayerListLayout.Parent = PlayerScrollingFrame
+PlayerListLayout.SortOrder = Enum.SortOrder.Name
+PlayerListLayout.Padding = UDim.new(0, 2)
+
+local RefreshButton = Instance.new("TextButton")
+RefreshButton.Name = "RefreshButton"
+RefreshButton.Size = UDim2.new(1, 0, 0, 30)
+RefreshButton.Position = UDim2.new(0, 0, 0, 0)
+RefreshButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+RefreshButton.Text = "Refresh Player List"
+RefreshButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+RefreshButton.TextSize = 14
+RefreshButton.Font = Enum.Font.SourceSans
+RefreshButton.Parent = PlayerListFrame
+
+-- Configuration
+local FOV_RADIUS = 100
+
+-- Create FOV Circle
+local fovCircle = Drawing.new("Circle")
+fovCircle.Visible = true
+fovCircle.Thickness = 1
+fovCircle.Color = Color3.fromRGB(255, 0, 0)
+fovCircle.Transparency = 0.5
+fovCircle.Radius = FOV_RADIUS
+fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+-- Wall Check Function
+local function isTargetVisible(targetCharacter)
+    if not wallCheckEnabled then return true end
+    
+    local origin = Camera.CFrame.Position
+    local targetPart = targetCharacter:FindFirstChild("HumanoidRootPart")
+    if not targetPart then return false end
+    
+    local direction = (targetPart.Position - origin).unit * (targetPart.Position - origin).Magnitude
+    local ray = Ray.new(origin, direction)
+    
+    -- Create a table of parts to ignore
+    local ignoreList = {localPlayer.Character}
+    if targetCharacter then
+        table.insert(ignoreList, targetCharacter)
+    end
+    
+    -- More precise ray check
+    local hit, pos = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    
+    -- Additional visibility checks
+    if hit then
+        -- Check if the hit part is part of the target
+        if hit:IsDescendantOf(targetCharacter) then
+            return true
+        end
+        
+        -- Check distance to hit vs distance to target
+        local hitDistance = (pos - origin).Magnitude
+        local targetDistance = (targetPart.Position - origin).Magnitude
+        
+        -- If we hit something closer than the target, target is not visible
+        if hitDistance < targetDistance then
+            return false
+        end
+    end
+    
+    return hit == nil or hit:IsDescendantOf(targetCharacter)
+end
+
+-- Function to get closest player
+local function getClosestPlayer()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer and not Friends[player.Name] and player.Character then
+            local character = player.Character
+            local humanoid = character:FindFirstChild("Humanoid")
+            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+            
+            -- Check if player is alive
+            if humanoid and humanoidRootPart and humanoid.Health > 0 then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
+
+                -- Ensure the target is on screen and visible
+                if onScreen and isTargetVisible(character) then
+                    -- Calculate distance from mouse position
+                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                    if distance < FOV_RADIUS and distance < shortestDistance then
+                        closestPlayer = player
+                        shortestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+-- Function to get target position on screen
+local function getTargetScreenPosition()
+    if not targetPlayer or not targetPlayer.Character then
+        return nil
+    end
+    
+    local targetPart
+    if targetMode == "Head" then
+        targetPart = targetPlayer.Character:FindFirstChild("Head")
+    else
+        targetPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    end
+    
+    if not targetPart then
+        return nil
+    end
+    
+    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+    if not onScreen or screenPos.Z <= 0 then
+        return nil
+    end
+    
+    return Vector2.new(screenPos.X, screenPos.Y)
+end
+
+-- Simplified Aim Lock Function with consistent smoothing
+local function aimAtTarget()
+    if targetPlayer and targetPlayer.Character then
+        local targetPart
+        if targetMode == "Head" then
+            targetPart = targetPlayer.Character:FindFirstChild("Head")
+        else
+            targetPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        end
+        
+        if targetPart then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+            
+            -- Only aim if target is on screen and in front of the camera
+            if screenPos.Z > 0 then
+                -- Get current mouse position
+                local mousePos = UserInputService:GetMouseLocation()
+                
+                -- Calculate the difference between target and current mouse position
+                local targetX = screenPos.X - mousePos.X
+                local targetY = screenPos.Y - mousePos.Y
+                
+                -- Apply consistent smoothing for all movement
+                if smoothingEnabled then
+                    -- Use smoothing value directly - lower values = smoother/slower movement
+                    local smoothness = math.clamp(smoothingValue, 0.01, 1)
+                    targetX = targetX * smoothness
+                    targetY = targetY * smoothness
+                end
+                
+                -- Apply movement only if it's significant enough
+                if math.abs(targetX) > 0.1 or math.abs(targetY) > 0.1 then
+                    mousemoverel(targetX, targetY)
+                end
+            end
+        end
+    end
+end
+
+-- Function to create player button
+local function createPlayerButton(playerName)
+    if not playerName then return nil end
+    
+    local button = Instance.new("TextButton")
+    button.Name = playerName .. "Button"
+    button.Size = UDim2.new(1, -10, 0, 25)
+    button.Position = UDim2.new(0, 5, 0, 0)
+    button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    button.Text = playerName .. (Friends[playerName] and " (Friend)" or "")
+    button.TextColor3 = Friends[playerName] and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 255, 255)
+    button.TextSize = 14
+    button.Font = Enum.Font.SourceSans
+    button.Parent = PlayerScrollingFrame
+    
+    button.MouseButton1Click:Connect(function()
+        if Friends[playerName] then
+            Friends[playerName] = nil
+            button.Text = playerName
+            button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            Friends[playerName] = true
+            button.Text = playerName .. " (Friend)"
+            button.TextColor3 = Color3.fromRGB(0, 255, 0)
+        end
+    end)
+    
+    return button
+end
+
+-- Function to refresh player list
+local function refreshPlayerList()
+    for _, child in pairs(PlayerScrollingFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    local playerButtons = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            local button = createPlayerButton(player.Name)
+            if button then
+                table.insert(playerButtons, button)
+            end
+        end
+    end
+    
+    PlayerScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, #playerButtons * 27)
+end
+
+-- Button Handlers
+AimLockButton.MouseButton1Click:Connect(function()
+    aimLockEnabled = not aimLockEnabled
+    AimLockButton.Text = "Aim Lock: " .. (aimLockEnabled and "ON" or "OFF")
+    AimLockButton.BackgroundColor3 = aimLockEnabled and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(50, 50, 50)
+end)
+
+AimModeButton.MouseButton1Click:Connect(function()
+    holdToAim = not holdToAim
+    AimModeButton.Text = "Mode: " .. (holdToAim and "Hold" or "Toggle")
+end)
+
+WallCheckButton.MouseButton1Click:Connect(function()
+    wallCheckEnabled = not wallCheckEnabled
+    WallCheckButton.Text = "Wall Check: " .. (wallCheckEnabled and "ON" or "OFF")
+    WallCheckButton.BackgroundColor3 = wallCheckEnabled and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(50, 50, 50)
+end)
+
+FovCircleButton.MouseButton1Click:Connect(function()
+    fovCircleVisible = not fovCircleVisible
+    fovCircle.Visible = fovCircleVisible
+    FovCircleButton.Text = "FOV Circle: " .. (fovCircleVisible and "ON" or "OFF")
+    FovCircleButton.BackgroundColor3 = fovCircleVisible and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(50, 50, 50)
+end)
+
+-- FOV TextBox handler
+FOVTextBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local value = tonumber(FOVTextBox.Text)
+        if value then
+            FOV_RADIUS = math.clamp(value, 10, 800)
+            fovCircle.Radius = FOV_RADIUS
+            FOVTextBox.Text = tostring(FOV_RADIUS)
+        else
+            FOVTextBox.Text = tostring(FOV_RADIUS)
+        end
+    end
+end)
+
+-- Smoothing TextBox handler
+SmoothingTextBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local value = tonumber(SmoothingTextBox.Text)
+        if value then
+            smoothingValue = math.clamp(value, 0, 1)
+            SmoothingTextBox.Text = string.format("%.2f", smoothingValue)
+        else
+            SmoothingTextBox.Text = string.format("%.2f", smoothingValue)
+        end
+    end
+end)
+
+-- Target Mode button handler
+TargetModeButton.MouseButton1Click:Connect(function()
+    targetMode = targetMode == "Head" and "Body" or "Head"
+    TargetModeButton.Text = "Target: " .. targetMode
+end)
+
+-- Minimize button handler
+MinimizeButton.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    
+    for _, child in pairs(MainFrame:GetChildren()) do
+        if child ~= Title and child ~= MinimizeButton then
+            child.Visible = not isMinimized
+        end
+    end
+    
+    MainFrame.Size = UDim2.new(0, 200, 0, isMinimized and 30 or 450)
+    MinimizeButton.Text = isMinimized and "+" or "-"
+end)
+
+-- Connect refresh button
+RefreshButton.MouseButton1Click:Connect(refreshPlayerList)
+
+-- Connect player events
+Players.PlayerAdded:Connect(function(player)
+    wait()
+    refreshPlayerList()
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    wait()
+    refreshPlayerList()
+end)
+
+-- Smoothing button handler
+SmoothingButton.MouseButton1Click:Connect(function()
+    smoothingEnabled = not smoothingEnabled
+    SmoothingButton.Text = "Smoothing: " .. (smoothingEnabled and "ON" or "OFF")
+    SmoothingButton.BackgroundColor3 = smoothingEnabled and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(50, 50, 50)
+end)
+
+-- Main Loop
+RunService.RenderStepped:Connect(function()
+    fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    fovCircle.Radius = FOV_RADIUS
+    
+    -- Check if current target is dead
+    if targetPlayer and targetPlayer.Character then
+        local humanoid = targetPlayer.Character:FindFirstChild("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then
+            targetPlayer = nil
+        end
+    end
+    
+    if holdToAim then
+        -- Hold mode
+        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+            local currentTime = os.clock()
+            if currentTime - lastTargetSwitchTime > targetSwitchCooldown then
+                targetPlayer = getClosestPlayer()
+                lastTargetSwitchTime = currentTime
+            end
+
+            if targetPlayer then aimAtTarget() end
+        else
+            targetPlayer = nil
+        end
+    else
+        -- Toggle mode
+        if aimLockEnabled then
+            local currentTime = os.clock()
+            if currentTime - lastTargetSwitchTime > targetSwitchCooldown then
+                targetPlayer = getClosestPlayer()
+                lastTargetSwitchTime = currentTime
+            end
+
+            if targetPlayer then aimAtTarget() end
+        end
+    end
+end)
+
+refreshPlayerList()
