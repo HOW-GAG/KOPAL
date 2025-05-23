@@ -1,0 +1,123 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+-- Create GUI elements
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "KUPAL Infinite Money"
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+MainFrame.BorderSizePixel = 0
+MainFrame.Position = UDim2.new(0.75, 0, 0.45, 0)
+MainFrame.Size = UDim2.new(0, 220, 0, 120)
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Parent = MainFrame
+TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TitleBar.BorderSizePixel = 0
+TitleBar.Size = UDim2.new(1, 0, 0, 32)
+
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Parent = TitleBar
+Title.BackgroundTransparency = 1
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.Size = UDim2.new(0.8, -10, 1, 0)
+Title.Font = Enum.Font.SourceSansBold
+Title.Text = "KUPAL Infinite Money"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 18
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Parent = TitleBar
+MinimizeButton.BackgroundTransparency = 1
+MinimizeButton.Position = UDim2.new(1, -32, 0, 0)
+MinimizeButton.Size = UDim2.new(0, 32, 1, 0)
+MinimizeButton.Font = Enum.Font.SourceSansBold
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.TextSize = 20
+
+local ButtonContainer = Instance.new("Frame")
+ButtonContainer.Name = "ButtonContainer"
+ButtonContainer.Parent = MainFrame
+ButtonContainer.BackgroundTransparency = 1
+ButtonContainer.Position = UDim2.new(0, 0, 0, 36)
+ButtonContainer.Size = UDim2.new(1, 0, 1, -36)
+
+local DiamondButton = Instance.new("TextButton")
+DiamondButton.Name = "DiamondButton"
+DiamondButton.Parent = ButtonContainer
+DiamondButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+DiamondButton.BorderSizePixel = 0
+DiamondButton.Position = UDim2.new(0.5, -75, 0, 10)
+DiamondButton.Size = UDim2.new(0, 150, 0, 38)
+DiamondButton.Font = Enum.Font.SourceSansBold
+DiamondButton.Text = "START"
+DiamondButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+DiamondButton.TextSize = 15
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Name = "StatusLabel"
+StatusLabel.Parent = ButtonContainer
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Position = UDim2.new(0.5, -90, 1, -25)
+StatusLabel.Size = UDim2.new(0, 180, 0, 22)
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.Text = ""
+StatusLabel.TextColor3 = Color3.fromRGB(130, 200, 130)
+StatusLabel.TextSize = 13
+StatusLabel.TextWrapped = true
+
+-- Minimize logic
+local minimized = false
+MinimizeButton.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        MainFrame.Size = UDim2.new(0, 220, 0, 32)
+        ButtonContainer.Visible = false
+        MinimizeButton.Text = "+"
+    else
+        MainFrame.Size = UDim2.new(0, 220, 0, 120)
+        ButtonContainer.Visible = true
+        MinimizeButton.Text = "-"
+    end
+end)
+
+-- Main logic for DiamondButton
+DiamondButton.MouseButton1Click:Connect(function()
+    StatusLabel.Text = ""
+    local character = player.Character or player.CharacterAdded:Wait()
+    local diamond = workspace:FindFirstChild("Diamond")
+    if diamond and diamond:IsA("BasePart") then
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.CFrame = diamond.CFrame + Vector3.new(0, 3, 0)
+        end
+    else
+        StatusLabel.Text = "Diamond not found!"
+        StatusLabel.TextColor3 = Color3.fromRGB(200, 60, 60)
+        return
+    end
+
+    local prompt = diamond:FindFirstChild("Prompt")
+    if prompt and prompt:IsA("ProximityPrompt") then
+        prompt.HoldDuration = 0
+        prompt.Enabled = true
+        prompt.ClickablePrompt = true
+        StatusLabel.Text = "Infinite Money Modified"
+        StatusLabel.TextColor3 = Color3.fromRGB(130, 200, 130)
+    else
+        StatusLabel.Text = "Prompt not found or not a ProximityPrompt!"
+        StatusLabel.TextColor3 = Color3.fromRGB(200, 60, 60)
+    end
+end)
