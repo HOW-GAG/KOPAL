@@ -1,0 +1,562 @@
+-- Services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- Variables
+local localPlayer = Players.LocalPlayer
+local selectedPlayer = nil
+local selectedReason = "Bullying or Harassment"
+local selectedChatType = "Text Chat"
+local isMinimized = false
+local reportCount = {}
+local selectedPlayers = {}
+
+-- Report reasons list
+local reportReasons = {
+    "Swearing",
+    "Off-platform links",
+    "Personal information",
+    "Dating/Sex",
+    "Cheating",
+    "Username",
+    "Bullying",
+    "Scamming"
+}
+
+-- Chat types
+local chatTypes = {
+    "Text Chat",
+    "Voice Chat"
+}
+
+-- Create ScreenGui with protection
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ReporterGui"
+ScreenGui.ResetOnSpawn = false
+
+local function protectGui()
+    if syn and syn.protect_gui then
+        syn.protect_gui(ScreenGui)
+        ScreenGui.Parent = game:GetService("CoreGui")
+    elseif gethui then
+        ScreenGui.Parent = gethui()
+    elseif game:GetService("CoreGui"):FindFirstChild("RobloxGui") then
+        ScreenGui.Parent = game:GetService("CoreGui").RobloxGui
+    else
+        ScreenGui.Parent = game:GetService("CoreGui")
+    end
+end
+
+-- Protect and parent the GUI
+pcall(protectGui)
+
+-- Create main frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 300, 0, 550)
+MainFrame.Position = UDim2.new(0.7, 0, 0.2, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+-- Add corner rounding
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+-- Create title bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 35)
+TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = TitleBar
+
+-- Create title
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, -40, 1, 0)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "🚨 KUPAL MULTI REPORTER"
+Title.TextColor3 = Color3.fromRGB(255, 85, 85)
+Title.TextSize = 16
+Title.Font = Enum.Font.SourceSansBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+-- Create minimize button
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Position = UDim2.new(1, -35, 0, 2.5)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+MinimizeButton.Text = "─"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.TextSize = 18
+MinimizeButton.Font = Enum.Font.SourceSansBold
+MinimizeButton.Parent = TitleBar
+
+local MinimizeCorner = Instance.new("UICorner")
+MinimizeCorner.CornerRadius = UDim.new(0, 4)
+MinimizeCorner.Parent = MinimizeButton
+
+-- Create content frame
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Name = "ContentFrame"
+ContentFrame.Size = UDim2.new(1, -20, 1, -45)
+ContentFrame.Position = UDim2.new(0, 10, 0, 40)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+-- Player Selection Section
+local PlayerLabel = Instance.new("TextLabel")
+PlayerLabel.Name = "PlayerLabel"
+PlayerLabel.Size = UDim2.new(1, 0, 0, 25)
+PlayerLabel.Position = UDim2.new(0, 0, 0, 5)
+PlayerLabel.BackgroundTransparency = 1
+PlayerLabel.Text = "👤 Select Player to Report:"
+PlayerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+PlayerLabel.TextSize = 14
+PlayerLabel.Font = Enum.Font.SourceSansBold
+PlayerLabel.TextXAlignment = Enum.TextXAlignment.Left
+PlayerLabel.Parent = ContentFrame
+
+-- Player List Frame
+local PlayerListFrame = Instance.new("Frame")
+PlayerListFrame.Name = "PlayerListFrame"
+PlayerListFrame.Size = UDim2.new(1, 0, 0, 120)
+PlayerListFrame.Position = UDim2.new(0, 0, 0, 30)
+PlayerListFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+PlayerListFrame.BorderSizePixel = 0
+PlayerListFrame.Parent = ContentFrame
+
+local PlayerListCorner = Instance.new("UICorner")
+PlayerListCorner.CornerRadius = UDim.new(0, 6)
+PlayerListCorner.Parent = PlayerListFrame
+
+local SearchBar = Instance.new("TextBox")
+SearchBar.Name = "SearchBar"
+SearchBar.Size = UDim2.new(1, 0, 0, 25)
+SearchBar.Position = UDim2.new(0, 0, 0, 0)
+SearchBar.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+SearchBar.PlaceholderText = "🔍 Search players..."
+SearchBar.Text = ""
+SearchBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+SearchBar.PlaceholderColor3 = Color3.fromRGB(180, 180, 180)
+SearchBar.TextSize = 14
+SearchBar.Font = Enum.Font.SourceSans
+SearchBar.Parent = PlayerListFrame
+
+local SearchBarCorner = Instance.new("UICorner")
+SearchBarCorner.CornerRadius = UDim.new(0, 6)
+SearchBarCorner.Parent = SearchBar
+
+local PlayerScrollingFrame = Instance.new("ScrollingFrame")
+PlayerScrollingFrame.Name = "PlayerScrollingFrame"
+PlayerScrollingFrame.Size = UDim2.new(1, -10, 1, -35)
+PlayerScrollingFrame.Position = UDim2.new(0, 5, 0, 30)
+PlayerScrollingFrame.BackgroundTransparency = 1
+PlayerScrollingFrame.BorderSizePixel = 0
+PlayerScrollingFrame.ScrollBarThickness = 6
+PlayerScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+PlayerScrollingFrame.Parent = PlayerListFrame
+
+local PlayerListLayout = Instance.new("UIListLayout")
+PlayerListLayout.Parent = PlayerScrollingFrame
+PlayerListLayout.SortOrder = Enum.SortOrder.Name
+PlayerListLayout.Padding = UDim.new(0, 3)
+
+-- Report Reason Section
+local ReasonLabel = Instance.new("TextLabel")
+ReasonLabel.Name = "ReasonLabel"
+ReasonLabel.Size = UDim2.new(1, 0, 0, 25)
+ReasonLabel.Position = UDim2.new(0, 0, 0, 160)
+ReasonLabel.BackgroundTransparency = 1
+ReasonLabel.Text = "⚠️ Report Reason:"
+ReasonLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+ReasonLabel.TextSize = 14
+ReasonLabel.Font = Enum.Font.SourceSansBold
+ReasonLabel.TextXAlignment = Enum.TextXAlignment.Left
+ReasonLabel.Parent = ContentFrame
+
+-- Reason Dropdown
+local ReasonDropdown = Instance.new("TextButton")
+ReasonDropdown.Name = "ReasonDropdown"
+ReasonDropdown.Size = UDim2.new(1, 0, 0, 35)
+ReasonDropdown.Position = UDim2.new(0, 0, 0, 185)
+ReasonDropdown.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+ReasonDropdown.Text = selectedReason .. " ▼"
+ReasonDropdown.TextColor3 = Color3.fromRGB(255, 255, 255)
+ReasonDropdown.TextSize = 13
+ReasonDropdown.Font = Enum.Font.SourceSans
+ReasonDropdown.TextXAlignment = Enum.TextXAlignment.Left
+ReasonDropdown.Parent = ContentFrame
+
+local ReasonDropdownCorner = Instance.new("UICorner")
+ReasonDropdownCorner.CornerRadius = UDim.new(0, 6)
+ReasonDropdownCorner.Parent = ReasonDropdown
+
+local ReasonPadding = Instance.new("UIPadding")
+ReasonPadding.PaddingLeft = UDim.new(0, 10)
+ReasonPadding.Parent = ReasonDropdown
+
+-- Chat Type Section
+local ChatTypeLabel = Instance.new("TextLabel")
+ChatTypeLabel.Name = "ChatTypeLabel"
+ChatTypeLabel.Size = UDim2.new(1, 0, 0, 25)
+ChatTypeLabel.Position = UDim2.new(0, 0, 0, 230)
+ChatTypeLabel.BackgroundTransparency = 1
+ChatTypeLabel.Text = "💬 Chat Type:"
+ChatTypeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+ChatTypeLabel.TextSize = 14
+ChatTypeLabel.Font = Enum.Font.SourceSansBold
+ChatTypeLabel.TextXAlignment = Enum.TextXAlignment.Left
+ChatTypeLabel.Parent = ContentFrame
+
+-- Chat Type Dropdown
+local ChatTypeDropdown = Instance.new("TextButton")
+ChatTypeDropdown.Name = "ChatTypeDropdown"
+ChatTypeDropdown.Size = UDim2.new(1, 0, 0, 35)
+ChatTypeDropdown.Position = UDim2.new(0, 0, 0, 255)
+ChatTypeDropdown.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+ChatTypeDropdown.Text = selectedChatType .. " ▼"
+ChatTypeDropdown.TextColor3 = Color3.fromRGB(255, 255, 255)
+ChatTypeDropdown.TextSize = 13
+ChatTypeDropdown.Font = Enum.Font.SourceSans
+ChatTypeDropdown.TextXAlignment = Enum.TextXAlignment.Left
+ChatTypeDropdown.Parent = ContentFrame
+
+local ChatTypeDropdownCorner = Instance.new("UICorner")
+ChatTypeDropdownCorner.CornerRadius = UDim.new(0, 6)
+ChatTypeDropdownCorner.Parent = ChatTypeDropdown
+
+local ChatTypePadding = Instance.new("UIPadding")
+ChatTypePadding.PaddingLeft = UDim.new(0, 10)
+ChatTypePadding.Parent = ChatTypeDropdown
+
+-- Report Count Display
+local ReportCountLabel = Instance.new("TextLabel")
+ReportCountLabel.Name = "ReportCountLabel"
+ReportCountLabel.Size = UDim2.new(1, 0, 0, 25)
+ReportCountLabel.Position = UDim2.new(0, 0, 0, 300)
+ReportCountLabel.BackgroundTransparency = 1
+ReportCountLabel.Text = "📊 Reports Sent: 0"
+ReportCountLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+ReportCountLabel.TextSize = 14
+ReportCountLabel.Font = Enum.Font.SourceSansBold
+ReportCountLabel.TextXAlignment = Enum.TextXAlignment.Center
+ReportCountLabel.Parent = ContentFrame
+
+-- Report Button
+local ReportButton = Instance.new("TextButton")
+ReportButton.Name = "ReportButton"
+ReportButton.Size = UDim2.new(1, 0, 0, 45)
+ReportButton.Position = UDim2.new(0, 0, 0, 335)
+ReportButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+ReportButton.Text = "🚨 SEND REPORT"
+ReportButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ReportButton.TextSize = 16
+ReportButton.Font = Enum.Font.SourceSansBold
+ReportButton.Parent = ContentFrame
+
+local ReportButtonCorner = Instance.new("UICorner")
+ReportButtonCorner.CornerRadius = UDim.new(0, 8)
+ReportButtonCorner.Parent = ReportButton
+
+-- Mass Report Button
+local MassReportButton = Instance.new("TextButton")
+MassReportButton.Name = "MassReportButton"
+MassReportButton.Size = UDim2.new(1, 0, 0, 45)
+MassReportButton.Position = UDim2.new(0, 0, 0, 390)
+MassReportButton.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
+MassReportButton.Text = "⚡ MASS REPORT (10x)"
+MassReportButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MassReportButton.TextSize = 16
+MassReportButton.Font = Enum.Font.SourceSansBold
+MassReportButton.Parent = ContentFrame
+
+local MassReportButtonCorner = Instance.new("UICorner")
+MassReportButtonCorner.CornerRadius = UDim.new(0, 8)
+MassReportButtonCorner.Parent = MassReportButton
+
+-- Status Label
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Name = "StatusLabel"
+StatusLabel.Size = UDim2.new(1, 0, 0, 25)
+StatusLabel.Position = UDim2.new(0, 0, 0, 445)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Ready to report"
+StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+StatusLabel.TextSize = 12
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Center
+StatusLabel.Parent = ContentFrame
+
+-- Add search functionality
+local function filterPlayers(searchText)
+    for _, button in pairs(PlayerScrollingFrame:GetChildren()) do
+        if button:IsA("TextButton") then
+            local playerName = button.Name:gsub("Button", ""):lower()
+            local isVisible = searchText == "" or playerName:find(searchText:lower())
+            button.Visible = isVisible
+        end
+    end
+end
+
+SearchBar.Changed:Connect(function(prop)
+    if prop == "Text" then
+        filterPlayers(SearchBar.Text)
+    end
+end)
+
+-- Functions
+local function updateReportCount()
+    local totalReports = 0
+    for _, count in pairs(reportCount) do
+        totalReports = totalReports + count
+    end
+    ReportCountLabel.Text = "📊 Reports Sent: " .. totalReports
+end
+
+local function updateStatus(message, color)
+    StatusLabel.Text = message
+    StatusLabel.TextColor3 = color or Color3.fromRGB(150, 150, 150)
+    wait(3)
+    StatusLabel.Text = "Ready to report"
+    StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+end
+
+local function createPlayerButton(player)
+    if not player or player == localPlayer then return nil end
+    
+    local button = Instance.new("TextButton")
+    button.Name = player.Name .. "Button"
+    button.Size = UDim2.new(1, -10, 0, 30)
+    button.Position = UDim2.new(0, 5, 0, 0)
+    button.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+    button.Text = "👤 " .. player.Name .. " (" .. (reportCount[player.Name] or 0) .. " reports)"
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextSize = 12
+    button.Font = Enum.Font.SourceSans
+    button.TextXAlignment = Enum.TextXAlignment.Left
+    button.Parent = PlayerScrollingFrame
+    
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 4)
+    buttonCorner.Parent = button
+    
+    local buttonPadding = Instance.new("UIPadding")
+    buttonPadding.PaddingLeft = UDim.new(0, 8)
+    buttonPadding.Parent = button
+    
+    if selectedPlayers[player.Name] then
+        button.BackgroundColor3 = Color3.fromRGB(80, 120, 80)
+    else
+        button.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+    end
+    
+    button.MouseButton1Click:Connect(function()
+        selectedPlayers[player.Name] = not selectedPlayers[player.Name]
+        selectedPlayer = player
+        
+        -- Update button color based on selection
+        button.BackgroundColor3 = selectedPlayers[player.Name] and 
+            Color3.fromRGB(80, 120, 80) or 
+            Color3.fromRGB(55, 55, 55)
+            
+        StatusLabel.Text = "Selected: " .. player.Name
+        StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    end)
+    
+    return button
+end
+
+local function refreshPlayerList()
+    -- Clear existing buttons
+    for _, child in pairs(PlayerScrollingFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    local playerButtons = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            local button = createPlayerButton(player)
+            if button then
+                table.insert(playerButtons, button)
+            end
+        end
+    end
+    
+    PlayerScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, #playerButtons * 33)
+end
+
+local function createDropdownMenu(parent, items, selectedItem, callback)
+    local dropdown = Instance.new("Frame")
+    dropdown.Name = "DropdownMenu"
+    dropdown.Size = UDim2.new(1, 0, 0, math.min(#items * 25, 200))
+    dropdown.Position = UDim2.new(0, 0, 1, 2)
+    dropdown.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    dropdown.BorderSizePixel = 0
+    dropdown.ZIndex = 10
+    dropdown.Parent = parent
+    
+    local dropdownCorner = Instance.new("UICorner")
+    dropdownCorner.CornerRadius = UDim.new(0, 6)
+    dropdownCorner.Parent = dropdown
+    
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Size = UDim2.new(1, -4, 1, -4)
+    scrollFrame.Position = UDim2.new(0, 2, 0, 2)
+    scrollFrame.BackgroundTransparency = 1
+    scrollFrame.ScrollBarThickness = 4
+    scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+    scrollFrame.Parent = dropdown
+    
+    local layout = Instance.new("UIListLayout")
+    layout.Parent = scrollFrame
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    
+    for i, item in ipairs(items) do
+        local itemButton = Instance.new("TextButton")
+        itemButton.Size = UDim2.new(1, -4, 0, 23)
+        itemButton.Position = UDim2.new(0, 2, 0, 0)
+        itemButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        itemButton.Text = item
+        itemButton.TextColor3 = Color3.fromRGB(255, 255, 255) -- Make text white
+        itemButton.TextSize = 12
+        itemButton.Font = Enum.Font.SourceSans
+        itemButton.TextXAlignment = Enum.TextXAlignment.Left
+        itemButton.ZIndex = 11 -- Increase Z-index to ensure visibility
+        itemButton.Parent = scrollFrame
+        
+        local itemCorner = Instance.new("UICorner")
+        itemCorner.CornerRadius = UDim.new(0, 3)
+        itemCorner.Parent = itemButton
+        
+        local itemPadding = Instance.new("UIPadding")
+        itemPadding.PaddingLeft = UDim.new(0, 8)
+        itemPadding.Parent = itemButton
+        
+        itemButton.MouseEnter:Connect(function()
+            itemButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+        end)
+        
+        itemButton.MouseLeave:Connect(function()
+            itemButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        end)
+        
+        itemButton.MouseButton1Click:Connect(function()
+            callback(item)
+            dropdown:Destroy()
+        end)
+    end
+    
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, #items * 25)
+    
+    -- Close dropdown when clicking outside
+    local connection
+    connection = UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local mouse = localPlayer:GetMouse()
+            local framePos = dropdown.AbsolutePosition
+            local frameSize = dropdown.AbsoluteSize
+            
+            if mouse.X < framePos.X or mouse.X > framePos.X + frameSize.X or
+               mouse.Y < framePos.Y or mouse.Y > framePos.Y + frameSize.Y then
+                dropdown:Destroy()
+                connection:Disconnect()
+            end
+        end
+    end)
+end
+
+local function reportPlayer(player, reason, chatType, count)
+    if not player then
+        updateStatus("❌ No player selected!", Color3.fromRGB(255, 100, 100))
+        return
+    end
+    
+    count = count or 1
+    
+    for i = 1, count do
+        pcall(function()
+            Players:ReportAbuse(player, reason, chatType)
+        end)
+        
+        -- Add small delay between reports
+        if count > 1 then
+            wait(0.1)
+        end
+    end
+    
+    -- Update report count
+    if not reportCount[player.Name] then
+        reportCount[player.Name] = 0
+    end
+    reportCount[player.Name] = reportCount[player.Name] + count
+    
+    updateReportCount()
+    refreshPlayerList() -- Refresh to update report counts in buttons
+    
+    local message = count == 1 and 
+        ("✅ Reported " .. player.Name .. " for " .. reason) or
+        ("✅ Mass reported " .. player.Name .. " " .. count .. " times!")
+    updateStatus(message, Color3.fromRGB(100, 255, 100))
+end
+
+-- Event Handlers
+ReasonDropdown.MouseButton1Click:Connect(function()
+    createDropdownMenu(ReasonDropdown, reportReasons, selectedReason, function(reason)
+        selectedReason = reason
+        ReasonDropdown.Text = reason .. " ▼"
+    end)
+end)
+
+ChatTypeDropdown.MouseButton1Click:Connect(function()
+    createDropdownMenu(ChatTypeDropdown, chatTypes, selectedChatType, function(chatType)
+        selectedChatType = chatType
+        ChatTypeDropdown.Text = chatType .. " ▼"
+    end)
+end)
+
+ReportButton.MouseButton1Click:Connect(function()
+    reportPlayer(selectedPlayer, selectedReason, selectedChatType, 1)
+end)
+
+MassReportButton.MouseButton1Click:Connect(function()
+    reportPlayer(selectedPlayer, selectedReason, selectedChatType, 10)
+end)
+
+MinimizeButton.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    
+    ContentFrame.Visible = not isMinimized
+    MainFrame.Size = UDim2.new(0, 300, 0, isMinimized and 35 or 550)
+    MinimizeButton.Text = isMinimized and "+" or "─"
+end)
+
+-- Player events
+Players.PlayerAdded:Connect(function()
+    wait(0.5) -- Small delay to ensure player is fully loaded
+    refreshPlayerList()
+end)
+
+Players.PlayerRemoving:Connect(function()
+    wait(0.5)
+    refreshPlayerList()
+end)
+
+-- Initialize
+refreshPlayerList()
+updateReportCount()
