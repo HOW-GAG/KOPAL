@@ -1,0 +1,564 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local ZombiesFolder = workspace:WaitForChild("Zombies")
+local WeaponsFolder = ReplicatedStorage:WaitForChild("Weapons")
+
+-- HITBOX SETTINGS
+local hitboxSettings = {
+    enabled = true,
+    displaySize = 5, -- Display value (1-10)
+    headSize = 3.22, -- Actual size (1-6), calculated from displaySize
+    headTransparency = 0.5,
+    headColor = Color3.fromRGB(255, 0, 0)
+}
+
+-- WEAPON SETTINGS
+local weaponSettings = {
+    enabled = true,
+    ammo = 10000,
+    clipSize = 10000,
+    storedAmmo = 50000,
+    fireRate = 1100
+}
+
+-- Store original data
+local originalHeadData = {}
+local originalWeaponData = {}
+
+-- Function to convert display size (1-10) to actual size (1-6)
+local function getActualSize(displaySize)
+    return 1 + ((displaySize - 1) / 9) * 5 -- Maps 1-10 to 1-6
+end
+
+-- Create the main GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "GameModifierGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- Main frame (increased height for weapon controls)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 320, 0, 350)
+mainFrame.Position = UDim2.new(0.5, -160, 0.5, -175)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+-- Add rounded corners
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = mainFrame
+
+-- Add stroke
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(60, 60, 60)
+stroke.Thickness = 1
+stroke.Parent = mainFrame
+
+-- Title bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 35)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 12)
+titleCorner.Parent = titleBar
+
+-- Title text
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "TitleLabel"
+titleLabel.Size = UDim2.new(1, -50, 1, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "ZA Mod"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextScaled = true
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Parent = titleBar
+
+-- Minimize button
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Name = "MinimizeButton"
+minimizeBtn.Size = UDim2.new(0, 30, 0, 25)
+minimizeBtn.Position = UDim2.new(1, -35, 0, 5)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+minimizeBtn.Text = "_"
+minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeBtn.TextScaled = true
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.Parent = titleBar
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 4)
+minCorner.Parent = minimizeBtn
+
+-- Content frame with scrolling
+local contentFrame = Instance.new("ScrollingFrame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, -20, 1, -45)
+contentFrame.Position = UDim2.new(0, 10, 0, 40)
+contentFrame.BackgroundTransparency = 1
+contentFrame.BorderSizePixel = 0
+contentFrame.ScrollBarThickness = 6
+contentFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+contentFrame.CanvasSize = UDim2.new(0, 0, 0, 450)
+contentFrame.Parent = mainFrame
+
+-- HITBOX SECTION HEADER
+local hitboxHeader = Instance.new("TextLabel")
+hitboxHeader.Name = "HitboxHeader"
+hitboxHeader.Size = UDim2.new(1, 0, 0, 25)
+hitboxHeader.Position = UDim2.new(0, 0, 0, 10)
+hitboxHeader.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+hitboxHeader.Text = "ZOMBIE HITBOX"
+hitboxHeader.TextColor3 = Color3.fromRGB(255, 200, 100)
+hitboxHeader.TextScaled = true
+hitboxHeader.Font = Enum.Font.GothamBold
+hitboxHeader.Parent = contentFrame
+
+local hitboxHeaderCorner = Instance.new("UICorner")
+hitboxHeaderCorner.CornerRadius = UDim.new(0, 6)
+hitboxHeaderCorner.Parent = hitboxHeader
+
+-- Hitbox Enable/Disable Toggle
+local hitboxEnableLabel = Instance.new("TextLabel")
+hitboxEnableLabel.Name = "HitboxEnableLabel"
+hitboxEnableLabel.Size = UDim2.new(0.6, 0, 0, 25)
+hitboxEnableLabel.Position = UDim2.new(0, 0, 0, 45)
+hitboxEnableLabel.BackgroundTransparency = 1
+hitboxEnableLabel.Text = "Enable Hitbox:"
+hitboxEnableLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+hitboxEnableLabel.TextScaled = true
+hitboxEnableLabel.Font = Enum.Font.Gotham
+hitboxEnableLabel.TextXAlignment = Enum.TextXAlignment.Left
+hitboxEnableLabel.Parent = contentFrame
+
+local hitboxToggle = Instance.new("TextButton")
+hitboxToggle.Name = "HitboxToggle"
+hitboxToggle.Size = UDim2.new(0, 50, 0, 25)
+hitboxToggle.Position = UDim2.new(0.65, 0, 0, 45)
+hitboxToggle.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+hitboxToggle.Text = "ON"
+hitboxToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+hitboxToggle.TextScaled = true
+hitboxToggle.Font = Enum.Font.GothamBold
+hitboxToggle.BorderSizePixel = 0
+hitboxToggle.Parent = contentFrame
+
+local hitboxToggleCorner = Instance.new("UICorner")
+hitboxToggleCorner.CornerRadius = UDim.new(0, 6)
+hitboxToggleCorner.Parent = hitboxToggle
+
+-- Head Size Slider
+local sizeLabel = Instance.new("TextLabel")
+sizeLabel.Name = "SizeLabel"
+sizeLabel.Size = UDim2.new(1, 0, 0, 20)
+sizeLabel.Position = UDim2.new(0, 0, 0, 80)
+sizeLabel.BackgroundTransparency = 1
+sizeLabel.Text = "Head Size: " .. hitboxSettings.displaySize
+sizeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+sizeLabel.TextScaled = true
+sizeLabel.Font = Enum.Font.Gotham
+sizeLabel.TextXAlignment = Enum.TextXAlignment.Left
+sizeLabel.Parent = contentFrame
+
+local sizeSlider = Instance.new("Frame")
+sizeSlider.Name = "SizeSlider"
+sizeSlider.Size = UDim2.new(1, 0, 0, 8)
+sizeSlider.Position = UDim2.new(0, 0, 0, 105)
+sizeSlider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+sizeSlider.BorderSizePixel = 0
+sizeSlider.Parent = contentFrame
+
+local sliderCorner = Instance.new("UICorner")
+sliderCorner.CornerRadius = UDim.new(0, 4)
+sliderCorner.Parent = sizeSlider
+
+local sizeHandle = Instance.new("TextButton")
+sizeHandle.Name = "SizeHandle"
+sizeHandle.Size = UDim2.new(0, 16, 0, 16)
+sizeHandle.Position = UDim2.new((hitboxSettings.displaySize - 1) / 9, -8, 0, -4)
+sizeHandle.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+sizeHandle.Text = ""
+sizeHandle.BorderSizePixel = 0
+sizeHandle.Parent = sizeSlider
+
+local handleCorner = Instance.new("UICorner")
+handleCorner.CornerRadius = UDim.new(1, 0)
+handleCorner.Parent = sizeHandle
+
+-- Transparency Slider
+local transparencyLabel = Instance.new("TextLabel")
+transparencyLabel.Name = "TransparencyLabel"
+transparencyLabel.Size = UDim2.new(1, 0, 0, 20)
+transparencyLabel.Position = UDim2.new(0, 0, 0, 125)
+transparencyLabel.BackgroundTransparency = 1
+transparencyLabel.Text = "Transparency: " .. math.floor(hitboxSettings.headTransparency * 100) .. "%"
+transparencyLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+transparencyLabel.TextScaled = true
+transparencyLabel.Font = Enum.Font.Gotham
+transparencyLabel.TextXAlignment = Enum.TextXAlignment.Left
+transparencyLabel.Parent = contentFrame
+
+local transparencySlider = Instance.new("Frame")
+transparencySlider.Name = "TransparencySlider"
+transparencySlider.Size = UDim2.new(1, 0, 0, 8)
+transparencySlider.Position = UDim2.new(0, 0, 0, 150)
+transparencySlider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+transparencySlider.BorderSizePixel = 0
+transparencySlider.Parent = contentFrame
+
+local transparencySliderCorner = Instance.new("UICorner")
+transparencySliderCorner.CornerRadius = UDim.new(0, 4)
+transparencySliderCorner.Parent = transparencySlider
+
+local transparencyHandle = Instance.new("TextButton")
+transparencyHandle.Name = "TransparencyHandle"
+transparencyHandle.Size = UDim2.new(0, 16, 0, 16)
+transparencyHandle.Position = UDim2.new(hitboxSettings.headTransparency, -8, 0, -4)
+transparencyHandle.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+transparencyHandle.Text = ""
+transparencyHandle.BorderSizePixel = 0
+transparencyHandle.Parent = transparencySlider
+
+local transparencyHandleCorner = Instance.new("UICorner")
+transparencyHandleCorner.CornerRadius = UDim.new(1, 0)
+transparencyHandleCorner.Parent = transparencyHandle
+
+-- WEAPON SECTION HEADER
+local weaponHeader = Instance.new("TextLabel")
+weaponHeader.Name = "WeaponHeader"
+weaponHeader.Size = UDim2.new(1, 0, 0, 25)
+weaponHeader.Position = UDim2.new(0, 0, 0, 180)
+weaponHeader.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+weaponHeader.Text = "WEAPON MODIFIER"
+weaponHeader.TextColor3 = Color3.fromRGB(100, 200, 255)
+weaponHeader.TextScaled = true
+weaponHeader.Font = Enum.Font.GothamBold
+weaponHeader.Parent = contentFrame
+
+local weaponHeaderCorner = Instance.new("UICorner")
+weaponHeaderCorner.CornerRadius = UDim.new(0, 6)
+weaponHeaderCorner.Parent = weaponHeader
+
+-- Weapon Enable/Disable Toggle
+local weaponEnableLabel = Instance.new("TextLabel")
+weaponEnableLabel.Name = "WeaponEnableLabel"
+weaponEnableLabel.Size = UDim2.new(0.6, 0, 0, 25)
+weaponEnableLabel.Position = UDim2.new(0, 0, 0, 215)
+weaponEnableLabel.BackgroundTransparency = 1
+weaponEnableLabel.Text = "Enable Weapon Mod:"
+weaponEnableLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+weaponEnableLabel.TextScaled = true
+weaponEnableLabel.Font = Enum.Font.Gotham
+weaponEnableLabel.TextXAlignment = Enum.TextXAlignment.Left
+weaponEnableLabel.Parent = contentFrame
+
+local weaponToggle = Instance.new("TextButton")
+weaponToggle.Name = "WeaponToggle"
+weaponToggle.Size = UDim2.new(0, 50, 0, 25)
+weaponToggle.Position = UDim2.new(0.65, 0, 0, 215)
+weaponToggle.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+weaponToggle.Text = "ON"
+weaponToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+weaponToggle.TextScaled = true
+weaponToggle.Font = Enum.Font.GothamBold
+weaponToggle.BorderSizePixel = 0
+weaponToggle.Parent = contentFrame
+
+local weaponToggleCorner = Instance.new("UICorner")
+weaponToggleCorner.CornerRadius = UDim.new(0, 6)
+weaponToggleCorner.Parent = weaponToggle
+
+-- Apply All Button
+local applyAllBtn = Instance.new("TextButton")
+applyAllBtn.Name = "ApplyAllButton"
+applyAllBtn.Size = UDim2.new(1, 0, 0, 35)
+applyAllBtn.Position = UDim2.new(0, 0, 0, 250)
+applyAllBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+applyAllBtn.Text = "🔄 APPLY ALL MODIFICATIONS"
+applyAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+applyAllBtn.TextScaled = true
+applyAllBtn.Font = Enum.Font.GothamBold
+applyAllBtn.BorderSizePixel = 0
+applyAllBtn.Parent = contentFrame
+
+local applyAllCorner = Instance.new("UICorner")
+applyAllCorner.CornerRadius = UDim.new(0, 8)
+applyAllCorner.Parent = applyAllBtn
+
+-- HITBOX FUNCTIONS
+local function storeOriginalHeadData(head)
+    if not originalHeadData[head] then
+        originalHeadData[head] = {
+            size = head.Size,
+            transparency = head.Transparency,
+            color = head.Color,
+            brickColor = head.BrickColor
+        }
+    end
+end
+
+local function resizeHead(zombie)
+    if zombie:FindFirstChild("Head") and zombie.Head:IsA("BasePart") then
+        local head = zombie.Head
+        storeOriginalHeadData(head)
+        
+        if hitboxSettings.enabled then
+            local size = hitboxSettings.headSize
+            head.Size = Vector3.new(size, size, size)
+            head.Transparency = hitboxSettings.headTransparency
+            head.Color = hitboxSettings.headColor
+            head.CanCollide = false
+        else
+            local original = originalHeadData[head]
+            if original then
+                head.Size = original.size
+                head.Transparency = original.transparency
+                head.Color = original.color
+                head.BrickColor = original.brickColor
+            end
+        end
+    end
+end
+
+local function updateAllZombies()
+    for _, zombie in pairs(ZombiesFolder:GetChildren()) do
+        resizeHead(zombie)
+    end
+end
+
+-- WEAPON FUNCTIONS
+local function storeOriginalWeaponData(weapon)
+    if not originalWeaponData[weapon] and weapon:FindFirstChild("Variables") then
+        local vars = weapon.Variables
+        originalWeaponData[weapon] = {
+            ammo = vars:FindFirstChild("Ammo") and vars.Ammo.Value or nil,
+            clipSize = vars:FindFirstChild("ClipSize") and vars.ClipSize.Value or nil,
+            storedAmmo = vars:FindFirstChild("StoredAmmo") and vars.StoredAmmo.Value or nil,
+            fireRate = vars:FindFirstChild("FireRate") and vars.FireRate.Value or nil
+        }
+    end
+end
+
+local function modifyWeapon(weapon)
+    local vars = weapon:FindFirstChild("Variables")
+    if vars then
+        storeOriginalWeaponData(weapon)
+        
+        if weaponSettings.enabled then
+            if vars:FindFirstChild("Ammo") then
+                vars.Ammo.Value = weaponSettings.ammo
+            end
+            if vars:FindFirstChild("ClipSize") then
+                vars.ClipSize.Value = weaponSettings.clipSize
+            end
+            if vars:FindFirstChild("StoredAmmo") then
+                vars.StoredAmmo.Value = weaponSettings.storedAmmo
+            end
+            if vars:FindFirstChild("FireRate") then
+                vars.FireRate.Value = weaponSettings.fireRate
+            end
+        else
+            local original = originalWeaponData[weapon]
+            if original then
+                if vars:FindFirstChild("Ammo") and original.ammo then
+                    vars.Ammo.Value = original.ammo
+                end
+                if vars:FindFirstChild("ClipSize") and original.clipSize then
+                    vars.ClipSize.Value = original.clipSize
+                end
+                if vars:FindFirstChild("StoredAmmo") and original.storedAmmo then
+                    vars.StoredAmmo.Value = original.storedAmmo
+                end
+                if vars:FindFirstChild("FireRate") and original.fireRate then
+                    vars.FireRate.Value = original.fireRate
+                end
+            end
+        end
+    end
+end
+
+local function updateAllWeapons()
+    for _, weapon in pairs(WeaponsFolder:GetChildren()) do
+        modifyWeapon(weapon)
+    end
+end
+
+-- GUI FUNCTIONALITY
+local isMinimized = false
+local originalSize = mainFrame.Size
+
+local function toggleMinimize()
+    local targetSize, targetText
+    
+    if isMinimized then
+        targetSize = originalSize
+        targetText = "_"
+        contentFrame.Visible = true
+    else
+        targetSize = UDim2.new(0, 320, 0, 35)
+        targetText = "+"
+        contentFrame.Visible = false
+    end
+    
+    local tween = TweenService:Create(
+        mainFrame,
+        TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+        {Size = targetSize}
+    )
+    
+    tween:Play()
+    minimizeBtn.Text = targetText
+    isMinimized = not isMinimized
+end
+
+local function toggleHitbox()
+    hitboxSettings.enabled = not hitboxSettings.enabled
+    
+    if hitboxSettings.enabled then
+        hitboxToggle.Text = "ON"
+        hitboxToggle.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    else
+        hitboxToggle.Text = "OFF"
+        hitboxToggle.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    end
+    
+    updateAllZombies()
+end
+
+local function toggleWeapons()
+    weaponSettings.enabled = not weaponSettings.enabled
+    
+    if weaponSettings.enabled then
+        weaponToggle.Text = "ON"
+        weaponToggle.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    else
+        weaponToggle.Text = "OFF"
+        weaponToggle.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    end
+    
+    updateAllWeapons()
+end
+
+local function applyAllModifications()
+    updateAllZombies()
+    updateAllWeapons()
+    
+    -- Visual feedback
+    applyAllBtn.Text = "✅ APPLIED!"
+    applyAllBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+    
+    task.wait(1)
+    
+    applyAllBtn.Text = "🔄 APPLY ALL MODIFICATIONS"
+    applyAllBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+end
+
+-- Size slider functionality
+local function updateSizeSlider()
+    local mouse = game.Players.LocalPlayer:GetMouse()
+    local sliderFrame = sizeSlider
+    local connection
+    
+    local function update()
+        local relativeX = math.clamp((mouse.X - sliderFrame.AbsolutePosition.X) / sliderFrame.AbsoluteSize.X, 0, 1)
+        hitboxSettings.displaySize = math.floor(relativeX * 9 + 1)
+        hitboxSettings.headSize = getActualSize(hitboxSettings.displaySize)
+        
+        sizeHandle.Position = UDim2.new(relativeX, -8, 0, -4)
+        sizeLabel.Text = "Head Size: " .. hitboxSettings.displaySize
+        
+        if hitboxSettings.enabled then
+            updateAllZombies()
+        end
+    end
+    
+    connection = UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            update()
+        end
+    end)
+    
+    local releaseConnection
+    releaseConnection = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            connection:Disconnect()
+            releaseConnection:Disconnect()
+        end
+    end)
+end
+
+-- Transparency slider functionality
+local function updateTransparencySlider()
+    local mouse = game.Players.LocalPlayer:GetMouse()
+    local sliderFrame = transparencySlider
+    local connection
+    
+    local function update()
+        local relativeX = math.clamp((mouse.X - sliderFrame.AbsolutePosition.X) / sliderFrame.AbsoluteSize.X, 0, 1)
+        hitboxSettings.headTransparency = relativeX
+        
+        transparencyHandle.Position = UDim2.new(relativeX, -8, 0, -4)
+        transparencyLabel.Text = "Transparency: " .. math.floor(hitboxSettings.headTransparency * 100) .. "%"
+        
+        if hitboxSettings.enabled then
+            updateAllZombies()
+        end
+    end
+    
+    connection = UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            update()
+        end
+    end)
+    
+    local releaseConnection
+    releaseConnection = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            connection:Disconnect()
+            releaseConnection:Disconnect()
+        end
+    end)
+end
+
+-- Connect events
+minimizeBtn.MouseButton1Click:Connect(toggleMinimize)
+hitboxToggle.MouseButton1Click:Connect(toggleHitbox)
+weaponToggle.MouseButton1Click:Connect(toggleWeapons)
+applyAllBtn.MouseButton1Click:Connect(applyAllModifications)
+sizeHandle.MouseButton1Down:Connect(updateSizeSlider)
+transparencyHandle.MouseButton1Down:Connect(updateTransparencySlider)
+
+-- Initialize modifications
+updateAllZombies()
+updateAllWeapons()
+
+-- Listen for new zombies spawning
+ZombiesFolder.ChildAdded:Connect(function(zombie)
+    zombie.ChildAdded:Connect(function(child)
+        if child.Name == "Head" and child:IsA("BasePart") then
+            task.wait(0.1)
+            resizeHead(zombie)
+        end
+    end)
+end)
+
+-- Listen for new weapons
+WeaponsFolder.ChildAdded:Connect(function(weapon)
+    task.wait(0.1)
+    modifyWeapon(weapon)
+end)
