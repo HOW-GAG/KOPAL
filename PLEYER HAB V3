@@ -1,0 +1,523 @@
+local OrionLib = loadstring(game:HttpGet(("https://raw.githubusercontent.com/jensonhirst/Orion/refs/heads/main/source")))()
+
+-- Services
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local Lighting = game:GetService("Lighting")
+
+-- Variables
+local player = Players.LocalPlayer
+local jumpEnabled = false
+local FLYING = false
+local flyKeyDown, flyKeyUp
+local flyspeed = 1
+local QEfly = true
+local vfly = false
+local movementSpeed = 16 -- Default movement speed
+local jumpHeight = 50 -- Default jump height
+local noclipEnabled = false
+local noclipConnection = nil
+local antiAFKEnabled = false
+local antiAFKConnection = nil
+local originalBrightness = Lighting.Brightness
+local originalAmbient = Lighting.Ambient
+local originalClockTime = Lighting.ClockTime
+local originalFogEnd = Lighting.FogEnd
+local originalGlobalShadows = Lighting.GlobalShadows
+local brightnessenabled = false
+local fullBrightConnection = nil
+
+
+-- Anti-AFK Function
+local function preventAFK()
+    if antiAFKConnection then
+        antiAFKConnection:Disconnect()
+    end
+    
+    antiAFKConnection = player.Idled:Connect(function()
+        if antiAFKEnabled then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end
+    end)
+end
+
+-- NoClip Functions
+local function enableNoclip()
+    local character = player.Character or player.CharacterAdded:Wait()
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            part.CanCollide = false
+        end
+    end
+end
+
+local function disableNoclip()
+    local character = player.Character or player.CharacterAdded:Wait()
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and not part.CanCollide then
+            part.CanCollide = true
+        end
+    end
+end
+
+-- Infinite Jump Function
+local jumpRequestConnection = nil
+local characterAddedConnection = nil
+
+local function onJumpRequest()
+    if jumpEnabled then
+        local character = player.Character or player.CharacterAdded:Wait()
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end
+
+-- Infinite Jump Character Added Handling
+local function onCharacterAdded(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    character:WaitForChild("HumanoidRootPart")
+    humanoid.Died:Connect(function()
+        player.CharacterAdded:Wait()
+        onCharacterAdded(player.Character)
+    end)
+    if FLYING then
+        sFLY(flyspeed, QEfly, vfly)
+    end
+    -- Set movement speed and jump height on respawn
+    humanoid.WalkSpeed = movementSpeed
+    humanoid.JumpPower = jumpHeight
+end
+
+-- Enhanced Fly Function with modern constraints
+local flyObjects = {}
+local flyConnection = nil
+
+function sFLY(flyspeed, QEfly, vfly)
+    -- Wait for essential components
+    repeat task.wait() until player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChildOfClass("Humanoid")
+    repeat task.wait() until player:GetMouse()
+    
+    -- Clean up existing fly connections
+    if flyKeyDown or flyKeyUp then
+        if flyKeyDown.Disconnect then flyKeyDown:Disconnect() end
+        if flyKeyUp.Disconnect then flyKeyUp:Disconnect() end
+    end
+    
+    -- Clean up existing fly objects
+    for i, obj in pairs(flyObjects) do
+        if obj and obj.Parent then
+            obj:Destroy()
+        end
+    end
+    flyObjects = {}
+    
+    if flyConnection then
+        flyConnection:Disconnect()
+        flyConnection = nil
+    end
+
+    local character = player.Character
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local mouse = player:GetMouse()
+    
+    -- Movement controls
+    local CONTROL = {W = false, A = false, S = false, D = false, Q = false, E = false}
+    
+    local function createFlyObjects()
+        -- Create attachment for constraints
+        local flyAttachment = hrp:FindFirstChild("FlyAttachment")
+        if not flyAttachment then
+            flyAttachment = Instance.new("Attachment")
+            flyAttachment.Name = "FlyAttachment"
+            flyAttachment.Parent = hrp
+        end
+        
+        -- Create LinearVelocity for smooth movement
+        local linearVelocity = Instance.new("LinearVelocity")
+        linearVelocity.Attachment0 = flyAttachment
+        linearVelocity.MaxForce = math.huge
+        linearVelocity.VectorVelocity = Vector3.new(0, 0, 0)
+        linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+        linearVelocity.Parent = hrp
+        table.insert(flyObjects, linearVelocity)
+        
+        -- Create AlignOrientation for camera-relative movement
+        local alignOrientation = Instance.new("AlignOrientation")
+        alignOrientation.Attachment0 = flyAttachment
+        alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+        alignOrientation.MaxTorque = math.huge
+        alignOrientation.Responsiveness = 50
+        alignOrientation.RigidityEnabled = true
+        alignOrientation.Parent = hrp
+        table.insert(flyObjects, alignOrientation)
+        
+        -- Anti-gravity force to prevent falling
+        local antiGravity = Instance.new("VectorForce")
+        antiGravity.Attachment0 = flyAttachment
+        antiGravity.Force = Vector3.new(0, workspace.Gravity * hrp.AssemblyMass, 0)
+        antiGravity.RelativeTo = Enum.ActuatorRelativeTo.World
+        antiGravity.ApplyAtCenterOfMass = true
+        antiGravity.Parent = hrp
+        table.insert(flyObjects, antiGravity)
+        
+        -- Set humanoid states for flying
+        humanoid.PlatformStand = true
+        humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+        
+        return linearVelocity, alignOrientation
+    end
+    
+    local function startFlying()
+        FLYING = true
+        local linearVelocity, alignOrientation = createFlyObjects()
+        
+        -- Main fly update loop
+        flyConnection = RunService.RenderStepped:Connect(function()
+            if not FLYING or not hrp.Parent then return end
+            
+            local camera = workspace.CurrentCamera
+            local cameraCFrame = camera.CFrame
+            
+            -- Calculate movement vector based on input
+            local moveVector = Vector3.new(0, 0, 0)
+            
+            if CONTROL.W then
+                moveVector = moveVector + cameraCFrame.LookVector
+            end
+            if CONTROL.S then
+                moveVector = moveVector - cameraCFrame.LookVector
+            end
+            if CONTROL.A then
+                moveVector = moveVector - cameraCFrame.RightVector
+            end
+            if CONTROL.D then
+                moveVector = moveVector + cameraCFrame.RightVector
+            end
+            if QEfly and CONTROL.Q then
+                moveVector = moveVector - Vector3.new(0, 1, 0)
+            end
+            if QEfly and CONTROL.E then
+                moveVector = moveVector + Vector3.new(0, 1, 0)
+            end
+            
+            -- Normalize and apply speed
+            if moveVector.Magnitude > 0 then
+                moveVector = moveVector.Unit
+            end
+            
+            -- Apply velocity with enhanced speed calculation
+            local finalSpeed = flyspeed or 2
+            linearVelocity.VectorVelocity = moveVector * finalSpeed * 25
+            
+            -- Align orientation to camera for smooth turning
+            alignOrientation.CFrame = cameraCFrame
+        end)
+    end
+    
+    -- Enhanced key input handling
+    flyKeyDown = mouse.KeyDown:Connect(function(key)
+        local keyLower = key:lower()
+        if keyLower == 'w' then
+            CONTROL.W = true
+        elseif keyLower == 'a' then
+            CONTROL.A = true
+        elseif keyLower == 's' then
+            CONTROL.S = true
+        elseif keyLower == 'd' then
+            CONTROL.D = true
+        elseif QEfly and keyLower == 'q' then
+            CONTROL.Q = true
+        elseif QEfly and keyLower == 'e' then
+            CONTROL.E = true
+        end
+    end)
+    
+    flyKeyUp = mouse.KeyUp:Connect(function(key)
+        local keyLower = key:lower()
+        if keyLower == 'w' then
+            CONTROL.W = false
+        elseif keyLower == 'a' then
+            CONTROL.A = false
+        elseif keyLower == 's' then
+            CONTROL.S = false
+        elseif keyLower == 'd' then
+            CONTROL.D = false
+        elseif keyLower == 'q' then
+            CONTROL.Q = false
+        elseif keyLower == 'e' then
+            CONTROL.E = false
+        end
+    end)
+    
+    -- Start flying if enabled
+    if FLYING then
+        startFlying()
+    end
+end
+
+-- Enhanced fly cleanup function
+local function stopFlying()
+    FLYING = false
+    
+    -- Clean up connections
+    if flyConnection then
+        flyConnection:Disconnect()
+        flyConnection = nil
+    end
+    
+    if flyKeyDown and flyKeyDown.Disconnect then flyKeyDown:Disconnect() end
+    if flyKeyUp and flyKeyUp.Disconnect then flyKeyUp:Disconnect() end
+    
+    -- Clean up fly objects
+    for i, obj in pairs(flyObjects) do
+        if obj and obj.Parent then
+            obj:Destroy()
+        end
+    end
+    flyObjects = {}
+    
+    -- Reset humanoid state
+    if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        humanoid.PlatformStand = false
+        humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+    end
+end
+
+--Fullbright Function
+local function setFullBright(enabled)
+    if enabled then
+        -- Store original lighting values if not already stored
+        originalBrightness = Lighting.Brightness
+        originalAmbient = Lighting.Ambient
+        originalClockTime = Lighting.ClockTime
+        originalFogEnd = Lighting.FogEnd
+        originalGlobalShadows = Lighting.GlobalShadows
+        
+        -- Disconnect existing connection if it exists
+        if fullBrightConnection then
+            fullBrightConnection:Disconnect()
+        end
+        
+        -- Create a new connection that constantly updates lighting settings
+        fullBrightConnection = RunService.RenderStepped:Connect(function()
+            Lighting.Brightness = 2
+            Lighting.ClockTime = 14
+            Lighting.FogEnd = 100000
+            Lighting.GlobalShadows = false
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+        end)
+    else
+        -- Disconnect the update loop
+        if fullBrightConnection then
+            fullBrightConnection:Disconnect()
+            fullBrightConnection = nil
+        end
+        
+        -- Restore original lighting values
+        Lighting.Brightness = originalBrightness
+        Lighting.ClockTime = originalClockTime
+        Lighting.FogEnd = originalFogEnd
+        Lighting.GlobalShadows = originalGlobalShadows
+        Lighting.Ambient = originalAmbient
+    end
+end
+
+-- Kill Script Function
+local function killScript()
+    jumpEnabled = false
+    stopFlying() -- Use the enhanced stop flying function
+    antiAFKEnabled = false
+    setFullBright(false)
+    if fullBrightConnection then  
+        fullBrightConnection:Disconnect() 
+    end  
+    if antiAFKConnection then
+        antiAFKConnection:Disconnect()
+    end
+    if noclipEnabled then
+        noclipEnabled = false
+        if noclipConnection then
+            noclipConnection:Disconnect()
+        end
+        disableNoclip()
+    end
+    if jumpRequestConnection and jumpRequestConnection.Disconnect then jumpRequestConnection:Disconnect() end
+    if characterAddedConnection and characterAddedConnection.Disconnect then characterAddedConnection:Disconnect() end
+    OrionLib:Destroy()
+end
+
+
+-- Connect the jump request function to the UserInputService
+jumpRequestConnection = UserInputService.JumpRequest:Connect(onJumpRequest)
+
+-- Connect the character added function to the player's character
+characterAddedConnection = player.CharacterAdded:Connect(onCharacterAdded)
+
+-- Initialize for the current character
+if player.Character then
+    onCharacterAdded(player.Character)
+end
+
+-- Create Orion Window
+local Window = OrionLib:MakeWindow({
+    Name = "KUPAL Pleyer Hab",
+    HidePremium = false,
+    SaveConfig = true,
+    ConfigFolder = "HOWGAGScriptHub"
+})
+
+-- Create Tabs
+local MainTab = Window:MakeTab({
+    Name = "Main",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Infinite Jump Toggle
+MainTab:AddToggle({
+    Name = "Enable Infinite Jump",
+    Default = jumpEnabled,
+    Callback = function(Value)
+        jumpEnabled = Value
+    end
+})
+
+-- Fly Toggle
+MainTab:AddToggle({
+    Name = "Enable Fly",
+    Default = FLYING,
+    Callback = function(Value)
+        FLYING = Value
+        if FLYING then
+            sFLY(flyspeed, QEfly, vfly)
+        else
+            stopFlying()
+        end
+    end
+})
+
+-- Add NoClip Toggle to Main Tab
+MainTab:AddToggle({
+    Name = "Enable NoClip",
+    Default = noclipEnabled,
+    Callback = function(Value)
+        noclipEnabled = Value
+        if noclipEnabled then
+            noclipConnection = RunService.Stepped:Connect(enableNoclip)
+        else
+            if noclipConnection then
+                noclipConnection:Disconnect()
+            end
+            disableNoclip()
+        end
+    end
+})
+
+MainTab:AddToggle({
+    Name = "Full Bright",
+    Default = brightnessenabled,
+    Callback = function(Value)
+        brightnessenabled = Value
+        setFullBright(Value)
+    end
+})
+
+
+-- Fly Speed Slider
+MainTab:AddSlider({
+    Name = "Fly Speed",
+    Min = 1,
+    Max = 10,
+    Default = flyspeed,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 1,
+    ValueName = "Speed",
+    Callback = function(Value)
+        flyspeed = Value
+        if FLYING then
+            sFLY(flyspeed, QEfly, vfly)
+        end
+    end
+})
+
+-- Movement Speed Slider
+MainTab:AddSlider({
+    Name = "Movement Speed",
+    Min = 16,
+    Max = 500,
+    Default = movementSpeed,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 1,
+    ValueName = "Speed",
+    Callback = function(Value)
+        movementSpeed = Value
+        if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+            player.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = movementSpeed
+        end
+    end
+})
+
+-- Jump Height Slider
+MainTab:AddSlider({
+    Name = "Jump Height",
+    Min = 50,
+    Max = 500,
+    Default = jumpHeight,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 1,
+    ValueName = "Height",
+    Callback = function(Value)
+        jumpHeight = Value
+        if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+            player.Character:FindFirstChildOfClass("Humanoid").JumpPower = jumpHeight
+        end
+    end
+})
+
+MainTab:AddToggle({
+    Name = "Enable Anti-AFK",
+    Default = false,
+    Callback = function(Value)
+        antiAFKEnabled = Value
+        if antiAFKEnabled then
+            preventAFK()
+        elseif antiAFKConnection then
+            antiAFKConnection:Disconnect()
+        end
+    end
+})
+
+-- Create Settings Tab
+local SettingsTab = Window:MakeTab({
+    Name = "Settings",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+-- Kill Script Button
+SettingsTab:AddButton({
+    Name = "Kill Script",
+    Callback = function()
+        killScript()
+    end
+})
+
+-- Initialize Anti-AFK
+preventAFK()
+
+-- Notify the user that the script has loaded
+OrionLib:MakeNotification({
+    Name = "KUPAL Pleyer Hab",
+    Content = "Scripts loaded successfully!",
+    Image = "rbxassetid://4483345998",
+    Time = 5
+})
+
+OrionLib:Init()
