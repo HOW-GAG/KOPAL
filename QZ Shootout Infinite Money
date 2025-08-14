@@ -96,28 +96,32 @@ end)
 -- Main logic for DiamondButton
 DiamondButton.MouseButton1Click:Connect(function()
     StatusLabel.Text = ""
+
+    -- Teleport player to updated position
     local character = player.Character or player.CharacterAdded:Wait()
-    local diamond = workspace:FindFirstChild("Diamond")
-    if diamond and diamond:IsA("BasePart") then
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.CFrame = diamond.CFrame + Vector3.new(0, 3, 0)
-        end
-    else
-        StatusLabel.Text = "Diamond not found!"
-        StatusLabel.TextColor3 = Color3.fromRGB(200, 60, 60)
-        return
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        hrp.CFrame = CFrame.new(329.30, 85.78, 201.58)
     end
 
-    local prompt = diamond:FindFirstChild("Prompt")
-    if prompt and prompt:IsA("ProximityPrompt") then
-        prompt.HoldDuration = 0
-        prompt.Enabled = true
-        prompt.ClickablePrompt = true
-        StatusLabel.Text = "Infinite Money Modified"
+    -- Loop through everything in workspace.homes.home and find ALL "Cash"
+    local homeFolder = workspace:FindFirstChild("homes")
+    if homeFolder and homeFolder:FindFirstChild("home") then
+        for _, obj in ipairs(homeFolder.home:GetDescendants()) do
+            if obj.Name == "Cash" then
+                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt then
+                    prompt.HoldDuration = 0
+                    prompt.Enabled = true
+                    prompt.ClickablePrompt = true
+                end
+            end
+        end
+        StatusLabel.Text = "All Cash prompts updated!"
         StatusLabel.TextColor3 = Color3.fromRGB(130, 200, 130)
     else
-        StatusLabel.Text = "Prompt not found or not a ProximityPrompt!"
+        StatusLabel.Text = "Cash objects not found!"
         StatusLabel.TextColor3 = Color3.fromRGB(200, 60, 60)
     end
 end)
+
