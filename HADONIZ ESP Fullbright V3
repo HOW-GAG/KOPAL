@@ -7,12 +7,11 @@ local Lighting = game:GetService("Lighting")
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "ESPGui"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 
--- Create main frame
+-- Main frame
 local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 180, 0, 120) -- Increased height for extra button
+MainFrame.Size = UDim2.new(0, 180, 0, 120)
 MainFrame.Position = UDim2.new(0.8, 0, 0.3, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 MainFrame.BorderSizePixel = 0
@@ -20,14 +19,12 @@ MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
--- Corner rounding
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 6)
 MainCorner.Parent = MainFrame
 
 -- Title
 local Title = Instance.new("TextLabel")
-Title.Name = "Title"
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 Title.BorderSizePixel = 0
@@ -43,7 +40,6 @@ TitleCorner.Parent = Title
 
 -- ESP Button
 local ESPButton = Instance.new("TextButton")
-ESPButton.Name = "ESPButton"
 ESPButton.Size = UDim2.new(0.85, 0, 0, 35)
 ESPButton.Position = UDim2.new(0.075, 0, 0.3, 0)
 ESPButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
@@ -60,7 +56,6 @@ ButtonCorner.Parent = ESPButton
 
 -- FullBright Button
 local FBButton = Instance.new("TextButton")
-FBButton.Name = "FBButton"
 FBButton.Size = UDim2.new(0.85, 0, 0, 35)
 FBButton.Position = UDim2.new(0.075, 0, 0.65, 0)
 FBButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
@@ -76,11 +71,9 @@ FBButtonCorner.CornerRadius = UDim.new(0, 4)
 FBButtonCorner.Parent = FBButton
 
 -- ESP Variables
-local camera = workspace.CurrentCamera
 local localPlayer = Players.LocalPlayer
 local espEnabled = false
-local espObjects = {}
-local espConnection = nil
+local highlights = {}
 
 -- FullBright Variables
 local fbEnabled = false
@@ -93,7 +86,6 @@ local function toggleFullBright()
     fbEnabled = not fbEnabled
 
     if fbEnabled then
-        -- Keep forcing fullbright each frame
         fbConnection = RunService.RenderStepped:Connect(function()
             Lighting.Brightness = 2
             Lighting.Ambient = Color3.new(1, 1, 1)
@@ -102,11 +94,7 @@ local function toggleFullBright()
         FBButton.Text = "FullBright: ON"
         FBButton.BackgroundColor3 = Color3.fromRGB(65, 170, 65)
     else
-        -- Stop forcing fullbright
-        if fbConnection then
-            fbConnection:Disconnect()
-            fbConnection = nil
-        end
+        if fbConnection then fbConnection:Disconnect() fbConnection = nil end
         Lighting.Brightness = normalBrightness
         Lighting.Ambient = normalAmbient
         FBButton.Text = "FullBright: OFF"
@@ -114,182 +102,42 @@ local function toggleFullBright()
     end
 end
 
--- ESP Settings
-local ESP_SETTINGS = {
-    BOX_THICKNESS = 2,
-    BOX_FILLED = false,
-    BOX_TRANSPARENCY = 0.8,
-    FILL_ENABLED = true,
-    FILL_TRANSPARENCY = 0.1,
-    TEXT_SIZE = 13,
-    TEXT_OUTLINE = true,
-    ENEMY_COLOR = Color3.fromRGB(255, 65, 65),
-    TEAMMATE_COLOR = Color3.fromRGB(65, 255, 65),
-    NEUTRAL_COLOR = Color3.fromRGB(255, 255, 255),
-    MAX_DISTANCE = 1000,
-    MIN_SCALE = 0.3,
-    MAX_SCALE = 2.0,
-    BASE_HEIGHT = 55,
-    BASE_WIDTH = 35,
-    MAX_HEIGHT = 90,
-    MAX_WIDTH = 55,
-    MIN_HEIGHT = 25,
-    MIN_WIDTH = 18
-}
-
--- ESP Functions
-local function createESPObject()
-    local esp = {}
-    esp.box = Drawing.new("Square")
-    esp.box.Thickness = ESP_SETTINGS.BOX_THICKNESS
-    esp.box.Filled = ESP_SETTINGS.BOX_FILLED
-    esp.box.Transparency = ESP_SETTINGS.BOX_TRANSPARENCY
-    esp.box.Visible = false
-    
-    if ESP_SETTINGS.FILL_ENABLED then
-        esp.fill = Drawing.new("Square")
-        esp.fill.Thickness = 1
-        esp.fill.Filled = true
-        esp.fill.Transparency = ESP_SETTINGS.FILL_TRANSPARENCY
-        esp.fill.Visible = false
-    end
-    
-    esp.name = Drawing.new("Text")
-    esp.name.Size = ESP_SETTINGS.TEXT_SIZE
-    esp.name.Center = true
-    esp.name.Outline = ESP_SETTINGS.TEXT_OUTLINE
-    esp.name.OutlineColor = Color3.new(0, 0, 0)
-    esp.name.Color = Color3.fromRGB(255, 255, 255)
-    esp.name.Visible = false
-    
-    esp.healthBar = Drawing.new("Square")
-    esp.healthBar.Thickness = 1
-    esp.healthBar.Filled = true
-    esp.healthBar.Transparency = 0.8
-    esp.healthBar.Visible = false
-    
-    esp.healthBg = Drawing.new("Square")
-    esp.healthBg.Thickness = 1
-    esp.healthBg.Filled = true
-    esp.healthBg.Color = Color3.fromRGB(50, 50, 50)
-    esp.healthBg.Transparency = 0.5
-    esp.healthBg.Visible = false
-    
-    return esp
-end
-
-local function getPlayerColor(player)
-    if not player.Team or not localPlayer.Team then
-        return ESP_SETTINGS.NEUTRAL_COLOR
-    end
-    return player.Team == localPlayer.Team 
-        and ESP_SETTINGS.TEAMMATE_COLOR 
-        or ESP_SETTINGS.ENEMY_COLOR
-end
-
-local function calculateESPBounds(character)
-    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoidRootPart then return nil end
-    local rootPos = humanoidRootPart.Position
-    local screenPos, onScreen = camera:WorldToViewportPoint(rootPos)
-    if not onScreen or screenPos.Z <= 0 then return nil end
-    local distance = (camera.CFrame.Position - rootPos).Magnitude
-    if distance > ESP_SETTINGS.MAX_DISTANCE then return nil end
-    local scale = math.clamp(100 / distance, ESP_SETTINGS.MIN_SCALE, ESP_SETTINGS.MAX_SCALE)
-    local boxHeight = math.clamp(ESP_SETTINGS.BASE_HEIGHT * scale, ESP_SETTINGS.MIN_HEIGHT, ESP_SETTINGS.MAX_HEIGHT)
-    local boxWidth = math.clamp(ESP_SETTINGS.BASE_WIDTH * scale, ESP_SETTINGS.MIN_WIDTH, ESP_SETTINGS.MAX_WIDTH)
-    return {
-        center = Vector2.new(screenPos.X, screenPos.Y),
-        size = Vector2.new(boxWidth, boxHeight),
-        distance = distance,
-        scale = scale
-    }
-end
-
-local function updateESP()
-    for player, esp in pairs(espObjects) do
-        if player.Character and player ~= localPlayer then
-            local character = player.Character
-            local humanoid = character:FindFirstChild("Humanoid")
-            if humanoid and humanoid.Health > 0 then
-                local bounds = calculateESPBounds(character)
-                if bounds and espEnabled then
-                    local playerColor = getPlayerColor(player)
-                    local boxPos = bounds.center - bounds.size/2
-                    esp.box.Visible = true
-                    esp.box.Position = boxPos
-                    esp.box.Size = bounds.size
-                    esp.box.Color = playerColor
-                    if esp.fill then
-                        esp.fill.Visible = true
-                        esp.fill.Position = boxPos
-                        esp.fill.Size = bounds.size
-                        esp.fill.Color = playerColor
-                    end
-                    esp.name.Visible = true
-                    esp.name.Position = Vector2.new(bounds.center.X, boxPos.Y - 18)
-                    esp.name.Text = player.Name
-                    esp.name.Size = math.clamp(ESP_SETTINGS.TEXT_SIZE * bounds.scale, 10, 16)
-                    esp.name.Color = playerColor
-                    local healthPercent = humanoid.Health / humanoid.MaxHealth
-                    local healthBarHeight = bounds.size.Y * healthPercent
-                    local healthBarWidth = 4
-                    local healthBarX = boxPos.X - healthBarWidth - 2
-                    local healthBarY = boxPos.Y + bounds.size.Y - healthBarHeight
-                    esp.healthBg.Visible = true
-                    esp.healthBg.Position = Vector2.new(healthBarX, boxPos.Y)
-                    esp.healthBg.Size = Vector2.new(healthBarWidth, bounds.size.Y)
-                    esp.healthBar.Visible = true
-                    esp.healthBar.Position = Vector2.new(healthBarX, healthBarY)
-                    esp.healthBar.Size = Vector2.new(healthBarWidth, healthBarHeight)
-                    if healthPercent > 0.6 then
-                        esp.healthBar.Color = Color3.fromRGB(0, 255, 0)
-                    elseif healthPercent > 0.3 then
-                        esp.healthBar.Color = Color3.fromRGB(255, 255, 0)
-                    else
-                        esp.healthBar.Color = Color3.fromRGB(255, 0, 0)
-                    end
-                else
-                    esp.box.Visible = false
-                    if esp.fill then esp.fill.Visible = false end
-                    esp.name.Visible = false
-                    esp.healthBar.Visible = false
-                    esp.healthBg.Visible = false
-                end
-            else
-                esp.box.Visible = false
-                if esp.fill then esp.fill.Visible = false end
-                esp.name.Visible = false
-                esp.healthBar.Visible = false
-                esp.healthBg.Visible = false
-            end
-        end
+-- Create Highlight for a player
+local function addHighlight(player)
+    if player.Character and not highlights[player] then
+        local highlight = Instance.new("Highlight")
+        highlight.FillColor = Color3.fromRGB(255, 0, 0) -- inside fill red
+        highlight.OutlineColor = Color3.fromRGB(255, 0, 0) -- outline red
+        highlight.FillTransparency = 0.75 -- adjust see-through level
+        highlight.OutlineTransparency = 0 -- solid outline
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = player.Character
+        highlights[player] = highlight
     end
 end
 
-local function cleanupESP(esp)
-    esp.box:Remove()
-    if esp.fill then esp.fill:Remove() end
-    esp.name:Remove()
-    esp.healthBar:Remove()
-    esp.healthBg:Remove()
+local function removeHighlight(player)
+    if highlights[player] then
+        highlights[player]:Destroy()
+        highlights[player] = nil
+    end
 end
 
--- Toggle ESP
+-- ESP Toggle
 local function toggleESP()
     espEnabled = not espEnabled
     ESPButton.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
     ESPButton.BackgroundColor3 = espEnabled and Color3.fromRGB(65, 170, 65) or Color3.fromRGB(45, 45, 45)
+
     if espEnabled then
-        espConnection = RunService.RenderStepped:Connect(updateESP)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer then
+                addHighlight(player)
+            end
+        end
     else
-        if espConnection then espConnection:Disconnect() espConnection = nil end
-        for _, esp in pairs(espObjects) do
-            esp.box.Visible = false
-            if esp.fill then esp.fill.Visible = false end
-            esp.name.Visible = false
-            esp.healthBar.Visible = false
-            esp.healthBg.Visible = false
+        for player, _ in pairs(highlights) do
+            removeHighlight(player)
         end
     end
 end
@@ -298,34 +146,15 @@ end
 ESPButton.MouseButton1Click:Connect(toggleESP)
 FBButton.MouseButton1Click:Connect(toggleFullBright)
 
-
--- Initialize ESP for existing players
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= localPlayer then
-        espObjects[player] = createESPObject()
-    end
-end
-
+-- Handle players joining/leaving
 Players.PlayerAdded:Connect(function(player)
-    if player ~= localPlayer then
-        espObjects[player] = createESPObject()
-    end
+    player.CharacterAdded:Connect(function()
+        if espEnabled then
+            addHighlight(player)
+        end
+    end)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-    if espObjects[player] then
-        cleanupESP(espObjects[player])
-        espObjects[player] = nil
-    end
-end)
-
-ScreenGui.AncestryChanged:Connect(function()
-    if not ScreenGui.Parent then
-        for _, esp in pairs(espObjects) do
-            cleanupESP(esp)
-        end
-        if espConnection then
-            espConnection:Disconnect()
-        end
-    end
+    removeHighlight(player)
 end)
