@@ -1,0 +1,466 @@
+--// Variables \--
+local player = game:GetService("Players").LocalPlayer
+local runService = game:GetService("RunService")
+local userInputService = game:GetService("UserInputService")
+
+--// Settings (can be changed via GUI) \--
+local config = {
+    range = 6,
+    attackDelay = 0.15,
+    rotateToTarget = true,
+    lockRotation = true,
+    rotationSpeed = 0.5,
+    useFireTouch = true,
+}
+
+local isEnabled = false
+local lastAttackTime = 0
+local rotationConnection = nil
+
+--// Create GUI \--
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AuraGUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 300, 0, 450)
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -225)
+mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 10)
+uiCorner.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, -40, 0, 40)
+title.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+title.BorderSizePixel = 0
+title.Font = Enum.Font.GothamBold
+title.Text = "AURA SCRIPT"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 18
+title.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 10)
+titleCorner.Parent = title
+
+--// Minimize Button \--
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Name = "MinimizeButton"
+minimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+minimizeBtn.Position = UDim2.new(1, -70, 0, 5)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(255, 180, 60)
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.Text = "-"
+minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeBtn.TextSize = 20
+minimizeBtn.Parent = mainFrame
+
+local minimizeBtnCorner = Instance.new("UICorner")
+minimizeBtnCorner.CornerRadius = UDim.new(0, 8)
+minimizeBtnCorner.Parent = minimizeBtn
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -35, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 16
+closeBtn.Parent = mainFrame
+
+local closeBtnCorner = Instance.new("UICorner")
+closeBtnCorner.CornerRadius = UDim.new(0, 8)
+closeBtnCorner.Parent = closeBtn
+
+--// Content Frame (what gets hidden) \--
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, 0, 1, -40)
+contentFrame.Position = UDim2.new(0, 0, 0, 40)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+
+--// Toggle Button \--
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleButton"
+toggleBtn.Size = UDim2.new(0, 260, 0, 45)
+toggleBtn.Position = UDim2.new(0, 20, 0, 20)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.Text = "DISABLED"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize = 16
+toggleBtn.Parent = contentFrame
+
+local toggleBtnCorner = Instance.new("UICorner")
+toggleBtnCorner.CornerRadius = UDim.new(0, 8)
+toggleBtnCorner.Parent = toggleBtn
+
+--// Settings Container \--
+local settingsFrame = Instance.new("ScrollingFrame")
+settingsFrame.Name = "SettingsFrame"
+settingsFrame.Size = UDim2.new(0, 260, 0, 320)
+settingsFrame.Position = UDim2.new(0, 20, 0, 75)
+settingsFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+settingsFrame.BorderSizePixel = 0
+settingsFrame.ScrollBarThickness = 6
+settingsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+settingsFrame.Parent = contentFrame
+
+local settingsCorner = Instance.new("UICorner")
+settingsCorner.CornerRadius = UDim.new(0, 8)
+settingsCorner.Parent = settingsFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 10)
+listLayout.Parent = settingsFrame
+
+--// Helper function to create sliders \--
+local function createSlider(name, min, max, default, decimals)
+    local sliderFrame = Instance.new("Frame")
+    sliderFrame.Name = name .. "Slider"
+    sliderFrame.Size = UDim2.new(1, -10, 0, 60)
+    sliderFrame.BackgroundTransparency = 1
+    sliderFrame.Parent = settingsFrame
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.Text = name .. ": " .. default
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextSize = 14
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = sliderFrame
+    
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, 0, 0, 25)
+    sliderBg.Position = UDim2.new(0, 0, 0, 25)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = sliderFrame
+    
+    local sliderBgCorner = Instance.new("UICorner")
+    sliderBgCorner.CornerRadius = UDim.new(0, 6)
+    sliderBgCorner.Parent = sliderBg
+    
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    sliderFill.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+    sliderFill.BorderSizePixel = 0
+    sliderFill.Parent = sliderBg
+    
+    local sliderFillCorner = Instance.new("UICorner")
+    sliderFillCorner.CornerRadius = UDim.new(0, 6)
+    sliderFillCorner.Parent = sliderFill
+    
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Size = UDim2.new(1, 0, 1, 0)
+    sliderBtn.BackgroundTransparency = 1
+    sliderBtn.Text = ""
+    sliderBtn.Parent = sliderBg
+    
+    local dragging = false
+    
+    sliderBtn.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    
+    userInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    userInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local mousePos = userInputService:GetMouseLocation().X
+            local sliderPos = sliderBg.AbsolutePosition.X
+            local sliderSize = sliderBg.AbsoluteSize.X
+            local relativePos = math.clamp((mousePos - sliderPos) / sliderSize, 0, 1)
+            local value = min + (max - min) * relativePos
+            
+            if decimals then
+                value = math.floor(value * (10 ^ decimals)) / (10 ^ decimals)
+            else
+                value = math.floor(value)
+            end
+            
+            sliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
+            label.Text = name .. ": " .. value
+            
+            return value
+        end
+    end)
+    
+    return sliderFrame, label, sliderFill, function()
+        local relativePos = sliderFill.Size.X.Scale
+        local value = min + (max - min) * relativePos
+        if decimals then
+            return math.floor(value * (10 ^ decimals)) / (10 ^ decimals)
+        else
+            return math.floor(value)
+        end
+    end
+end
+
+--// Create sliders \--
+local rangeSlider, rangeLabel, rangeFill, getRangeValue = createSlider("Range", 1, 20, config.range, 0)
+local delaySlider, delayLabel, delayFill, getDelayValue = createSlider("Attack Delay", 0.05, 0.5, config.attackDelay, 2)
+local rotSpeedSlider, rotSpeedLabel, rotSpeedFill, getRotSpeedValue = createSlider("Rotation Speed", 0.1, 1, config.rotationSpeed, 1)
+
+--// Create checkboxes \--
+local function createCheckbox(name, default)
+    local checkFrame = Instance.new("Frame")
+    checkFrame.Name = name .. "Check"
+    checkFrame.Size = UDim2.new(1, -10, 0, 30)
+    checkFrame.BackgroundTransparency = 1
+    checkFrame.Parent = settingsFrame
+    
+    local checkBtn = Instance.new("TextButton")
+    checkBtn.Size = UDim2.new(0, 25, 0, 25)
+    checkBtn.BackgroundColor3 = default and Color3.fromRGB(100, 150, 255) or Color3.fromRGB(30, 30, 40)
+    checkBtn.BorderSizePixel = 0
+    checkBtn.Text = default and "✓" or ""
+    checkBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    checkBtn.TextSize = 18
+    checkBtn.Font = Enum.Font.GothamBold
+    checkBtn.Parent = checkFrame
+    
+    local checkCorner = Instance.new("UICorner")
+    checkCorner.CornerRadius = UDim.new(0, 6)
+    checkCorner.Parent = checkBtn
+    
+    local checkLabel = Instance.new("TextLabel")
+    checkLabel.Size = UDim2.new(1, -35, 1, 0)
+    checkLabel.Position = UDim2.new(0, 35, 0, 0)
+    checkLabel.BackgroundTransparency = 1
+    checkLabel.Font = Enum.Font.Gotham
+    checkLabel.Text = name
+    checkLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    checkLabel.TextSize = 14
+    checkLabel.TextXAlignment = Enum.TextXAlignment.Left
+    checkLabel.Parent = checkFrame
+    
+    local checked = default
+    
+    checkBtn.MouseButton1Click:Connect(function()
+        checked = not checked
+        checkBtn.BackgroundColor3 = checked and Color3.fromRGB(100, 150, 255) or Color3.fromRGB(30, 30, 40)
+        checkBtn.Text = checked and "✓" or ""
+    end)
+    
+    return checkFrame, function() return checked end
+end
+
+local rotateCheck, getRotateValue = createCheckbox("Rotate To Target", config.rotateToTarget)
+local lockRotCheck, getLockRotValue = createCheckbox("Lock Rotation", config.lockRotation)
+local fireTouchCheck, getFireTouchValue = createCheckbox("Extended Reach", config.useFireTouch)
+
+--// Update canvas size \--
+listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    settingsFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 10)
+end)
+
+--// Helper Functions \--
+local function sendNotification(text)
+    game.StarterGui:SetCore("SendNotification", {
+        Title = "AURA",
+        Text = text,
+        Duration = 2.0
+    })
+end
+
+local function getClosestTarget()
+    local myChar = player.Character
+    if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return nil end
+    
+    local myPos = myChar.HumanoidRootPart.Position
+    local closestTarget = nil
+    local closestDistance = getRangeValue()
+    
+    for _, p in ipairs(game.Players:GetPlayers()) do
+        if p ~= player then
+            local char = p.Character
+            if char then
+                local hum = char:FindFirstChild("Humanoid")
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                
+                if hum and hrp and hum.Health > 0 then
+                    local distance = (hrp.Position - myPos).Magnitude
+                    
+                    if distance <= closestDistance then
+                        closestDistance = distance
+                        closestTarget = {
+                            character = char,
+                            hrp = hrp,
+                            distance = distance
+                        }
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestTarget
+end
+
+local function startRotationLock()
+    if rotationConnection then
+        rotationConnection:Disconnect()
+    end
+    
+    rotationConnection = runService.RenderStepped:Connect(function()
+        if not isEnabled or not getRotateValue() then return end
+        
+        local myChar = player.Character
+        if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return end
+        
+        local target = getClosestTarget()
+        if not target then return end
+        
+        local myHRP = myChar.HumanoidRootPart
+        local myPos = myHRP.Position
+        local targetPos = target.hrp.Position
+        
+        -- Calculate direction (flat on Y axis)
+        local direction = (targetPos - myPos) * Vector3.new(1, 0, 1)
+        if direction.Magnitude > 0 then
+            local targetLookVector = direction.Unit
+            
+            if getLockRotValue() then
+                -- Force rotation by setting CFrame directly (keeps position, changes rotation)
+                local currentPos = myHRP.Position
+                myHRP.CFrame = CFrame.new(currentPos, currentPos + targetLookVector)
+            else
+                -- Smooth rotation
+                local lookCFrame = CFrame.new(myPos, myPos + targetLookVector)
+                myHRP.CFrame = myHRP.CFrame:Lerp(lookCFrame, getRotSpeedValue())
+            end
+        end
+    end)
+end
+
+local function stopRotationLock()
+    if rotationConnection then
+        rotationConnection:Disconnect()
+        rotationConnection = nil
+    end
+end
+
+local function attackTarget(target)
+    local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
+    if not tool then return false end
+    
+    -- Rapid fire mode for better hit chance
+    if getFireTouchValue() then
+        -- Activate tool 5 times very rapidly
+        for i = 1, 5 do
+            tool:Activate()
+            task.wait(0.02)
+        end
+    else
+        -- Single activation
+        tool:Activate()
+    end
+    
+    return true
+end
+
+--// Toggle Function \--
+local function toggleScript()
+    isEnabled = not isEnabled
+    
+    if isEnabled then
+        toggleBtn.Text = "ENABLED"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 255, 60)
+        sendNotification("Script is now enabled")
+        
+        -- Disable auto-rotate so we can control rotation
+        if player.Character and player.Character:FindFirstChild("Humanoid") then
+            player.Character.Humanoid.AutoRotate = false
+        end
+        
+        startRotationLock()
+    else
+        toggleBtn.Text = "DISABLED"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+        sendNotification("Script is now disabled")
+        
+        -- Re-enable auto-rotate
+        if player.Character and player.Character:FindFirstChild("Humanoid") then
+            player.Character.Humanoid.AutoRotate = true
+        end
+        
+        stopRotationLock()
+    end
+end
+
+--// Minimize Function \--
+local isMinimized = false
+minimizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    
+    if isMinimized then
+        contentFrame.Visible = false
+        mainFrame.Size = UDim2.new(0, 300, 0, 40)
+        minimizeBtn.Text = "+"
+    else
+        contentFrame.Visible = true
+        mainFrame.Size = UDim2.new(0, 300, 0, 450)
+        minimizeBtn.Text = "-"
+    end
+end)
+
+--// GUI Events \--
+toggleBtn.MouseButton1Click:Connect(toggleScript)
+
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+    stopRotationLock()
+    
+    -- Re-enable auto-rotate when closing
+    if player.Character and player.Character:FindFirstChild("Humanoid") then
+        player.Character.Humanoid.AutoRotate = true
+    end
+end)
+
+--// Keybind (X to toggle) \--
+userInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+    if not gameProcessedEvent and input.KeyCode == Enum.KeyCode.X then
+        toggleScript()
+    end
+end)
+
+--// Main Attack Loop \--
+runService.Heartbeat:Connect(function()
+    if not isEnabled then return end
+    
+    local currentTime = tick()
+    
+    if currentTime - lastAttackTime < getDelayValue() then return end
+    
+    local target = getClosestTarget()
+    if not target then return end
+    
+    if attackTarget(target) then
+        lastAttackTime = currentTime
+    end
+end)
+
+--// Parent GUI \--
+screenGui.Parent = player:WaitForChild("PlayerGui")
