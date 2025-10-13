@@ -1,0 +1,598 @@
+--hadonize esp skeleton
+local success, error = pcall(function()
+    repeat wait() until game:IsLoaded()
+end)
+
+-- Services with error handling
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local CoreGui = game:GetService("CoreGui")
+
+-- Wait for LocalPlayer to exist
+local localPlayer = Players.LocalPlayer
+if not localPlayer then
+    Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+    localPlayer = Players.LocalPlayer
+end
+
+-- Wait for PlayerGui with fallback to CoreGui
+local playerGui
+pcall(function()
+    playerGui = localPlayer:WaitForChild("PlayerGui", 10)
+end)
+
+if not playerGui then
+    playerGui = CoreGui
+end
+
+-- Create ScreenGui with protection
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ESPGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = playerGui
+
+-- Create main frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 180, 0, 120)
+MainFrame.Position = UDim2.new(0.8, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+-- Corner rounding
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 6)
+MainCorner.Parent = MainFrame
+
+-- Title
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, 0, 0, 25)
+Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+Title.BorderSizePixel = 0
+Title.Text = "Skeleton ESP + FullBright"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 14
+Title.Font = Enum.Font.GothamBold
+Title.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 6)
+TitleCorner.Parent = Title
+
+-- ESP Button
+local ESPButton = Instance.new("TextButton")
+ESPButton.Name = "ESPButton"
+ESPButton.Size = UDim2.new(0.85, 0, 0, 35)
+ESPButton.Position = UDim2.new(0.075, 0, 0.3, 0)
+ESPButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+ESPButton.BorderSizePixel = 0
+ESPButton.Text = "ESP: OFF"
+ESPButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ESPButton.TextSize = 12
+ESPButton.Font = Enum.Font.Gotham
+ESPButton.Parent = MainFrame
+
+local ButtonCorner = Instance.new("UICorner")
+ButtonCorner.CornerRadius = UDim.new(0, 4)
+ButtonCorner.Parent = ESPButton
+
+-- FullBright Button
+local FBButton = Instance.new("TextButton")
+FBButton.Name = "FBButton"
+FBButton.Size = UDim2.new(0.85, 0, 0, 35)
+FBButton.Position = UDim2.new(0.075, 0, 0.65, 0)
+FBButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+FBButton.BorderSizePixel = 0
+FBButton.Text = "FullBright: OFF"
+FBButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+FBButton.TextSize = 12
+FBButton.Font = Enum.Font.Gotham
+FBButton.Parent = MainFrame
+
+local FBButtonCorner = Instance.new("UICorner")
+FBButtonCorner.CornerRadius = UDim.new(0, 4)
+FBButtonCorner.Parent = FBButton
+
+-- ESP Variables with protection
+local camera = workspace.CurrentCamera
+local espEnabled = false
+local espObjects = {}
+local espConnection = nil
+
+-- FullBright Variables
+local fbEnabled = false
+local normalBrightness = Lighting.Brightness
+local normalAmbient = Lighting.Ambient
+local fbConnection
+
+-- FullBright Function (unchanged)
+local function toggleFullBright()
+    fbEnabled = not fbEnabled
+    
+    if fbEnabled then
+        fbConnection = RunService.RenderStepped:Connect(function()
+            Lighting.Brightness = 2
+            Lighting.Ambient = Color3.new(1, 1, 1)
+            Lighting.ClockTime = 14
+        end)
+        FBButton.Text = "FullBright: ON"
+        FBButton.BackgroundColor3 = Color3.fromRGB(65, 170, 65)
+    else
+        if fbConnection then
+            fbConnection:Disconnect()
+            fbConnection = nil
+        end
+        Lighting.Brightness = normalBrightness
+        Lighting.Ambient = normalAmbient
+        FBButton.Text = "FullBright: OFF"
+        FBButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    end
+end
+
+-- ESP Settings
+local ESP_SETTINGS = {
+    TEXT_SIZE = 13,
+    TEXT_OUTLINE = true,
+    ENEMY_COLOR = Color3.fromRGB(255, 65, 65),
+    TEAMMATE_COLOR = Color3.fromRGB(65, 255, 65),
+    NEUTRAL_COLOR = Color3.fromRGB(255, 255, 255),
+    SKELETON_COLOR = Color3.fromRGB(255, 255, 255),
+    LINE_THICKNESS = 2,
+    MAX_DISTANCE = 1000,
+    HEALTH_BAR_WIDTH = 4
+}
+
+-- Enhanced Character Detection Functions with error handling
+local function findBodyParts(character)
+    if not character then return {} end
+    
+    local parts = {}
+    local success = pcall(function()
+        -- Standard R15 parts
+        local r15Parts = {
+            head = {"Head"},
+            upperTorso = {"UpperTorso", "Torso"},
+            lowerTorso = {"LowerTorso"},
+            leftShoulder = {"LeftUpperArm", "Left Arm"},
+            rightShoulder = {"RightUpperArm", "Right Arm"},
+            leftElbow = {"LeftLowerArm"},
+            rightElbow = {"RightLowerArm"},
+            leftHand = {"LeftHand"},
+            rightHand = {"RightHand"},
+            leftHip = {"LeftUpperLeg", "Left Leg"},
+            rightHip = {"RightUpperLeg", "Right Leg"},
+            leftKnee = {"LeftLowerLeg"},
+            rightKnee = {"RightLowerLeg"},
+            leftFoot = {"LeftFoot"},
+            rightFoot = {"RightFoot"}
+        }
+        
+        -- Try to find each body part
+        for partName, possibleNames in pairs(r15Parts) do
+            for _, name in ipairs(possibleNames) do
+                local part = character:FindFirstChild(name)
+                if part and part:IsA("BasePart") then
+                    parts[partName] = part
+                    break
+                end
+            end
+        end
+        
+        -- Fallback: If no standard parts found, try to identify parts by position/size
+        if next(parts) == nil then
+            local allParts = {}
+            for _, child in ipairs(character:GetChildren()) do
+                if child:IsA("BasePart") then
+                    table.insert(allParts, child)
+                end
+            end
+            
+            -- Sort parts by Y position (highest = head, lowest = feet)
+            table.sort(allParts, function(a, b)
+                return a.Position.Y > b.Position.Y
+            end)
+            
+            -- Try to assign parts based on position and name patterns
+            for _, part in ipairs(allParts) do
+                local name = part.Name:lower()
+                if name:find("head") and not parts.head then
+                    parts.head = part
+                elseif (name:find("torso") or name:find("chest") or name:find("body")) and not parts.upperTorso then
+                    parts.upperTorso = part
+                elseif (name:find("arm") or name:find("hand")) then
+                    if name:find("left") and not parts.leftShoulder then
+                        parts.leftShoulder = part
+                    elseif name:find("right") and not parts.rightShoulder then
+                        parts.rightShoulder = part
+                    elseif not parts.leftShoulder then
+                        parts.leftShoulder = part
+                    elseif not parts.rightShoulder then
+                        parts.rightShoulder = part
+                    end
+                elseif (name:find("leg") or name:find("foot")) then
+                    if name:find("left") and not parts.leftHip then
+                        parts.leftHip = part
+                    elseif name:find("right") and not parts.rightHip then
+                        parts.rightHip = part
+                    elseif not parts.leftHip then
+                        parts.leftHip = part
+                    elseif not parts.rightHip then
+                        parts.rightHip = part
+                    end
+                end
+            end
+        end
+    end)
+    
+    return success and parts or {}
+end
+
+local function findHumanoid(character)
+    if not character then return nil end
+    
+    local success, result = pcall(function()
+        local humanoidTypes = {"Humanoid", "Health", "Stats"}
+        
+        for _, humanoidName in ipairs(humanoidTypes) do
+            local humanoid = character:FindFirstChild(humanoidName)
+            if humanoid then
+                return humanoid
+            end
+        end
+        
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("Folder") or child:IsA("Model") then
+                local humanoid = child:FindFirstChild("Humanoid")
+                if humanoid then
+                    return humanoid
+                end
+            end
+        end
+        
+        return nil
+    end)
+    
+    return success and result or nil
+end
+
+local function getCharacterHealth(character)
+    if not character then return 100, 100 end
+    
+    local success, health, maxHealth = pcall(function()
+        local humanoid = findHumanoid(character)
+        
+        if humanoid and humanoid:IsA("Humanoid") then
+            return humanoid.Health, humanoid.MaxHealth
+        elseif humanoid then
+            local health = humanoid:FindFirstChild("Health") or humanoid:GetAttribute("Health")
+            local maxHealth = humanoid:FindFirstChild("MaxHealth") or humanoid:GetAttribute("MaxHealth")
+            
+            if health and maxHealth then
+                return health.Value or health, maxHealth.Value or maxHealth
+            end
+        end
+        
+        local healthValue = character:FindFirstChild("Health")
+        local maxHealthValue = character:FindFirstChild("MaxHealth")
+        
+        if healthValue and maxHealthValue then
+            return healthValue.Value or 100, maxHealthValue.Value or 100
+        end
+        
+        return 100, 100
+    end)
+    
+    return success and (health or 100) or 100, success and (maxHealth or 100) or 100
+end
+
+local function isValidCharacter(character, player)
+    if not character or not player then return false end
+    
+    local success, result = pcall(function()
+        -- Check standard parenting
+        if character.Parent == workspace or character.Parent == player then
+            return true
+        end
+        
+        -- Check for custom character systems
+        if character:GetAttribute("Owner") == player.Name or
+           character:GetAttribute("Player") == player.Name then
+            return true
+        end
+        
+        local playerName = character:FindFirstChild("PlayerName")
+        if playerName and playerName.Value == player.Name then
+            return true
+        end
+        
+        if character.Parent and character.Parent.Name == player.Name then
+            return true
+        end
+        
+        -- Must have at least some body parts
+        local parts = findBodyParts(character)
+        return next(parts) ~= nil
+    end)
+    
+    return success and result or false
+end
+
+-- Skeleton ESP Functions
+local function createSkeletonESP()
+    local esp = {}
+    
+    -- Create lines for skeleton
+    esp.lines = {}
+    local lineNames = {
+        "head_torso", "torso_leftArm", "torso_rightArm", 
+        "torso_leftLeg", "torso_rightLeg", "leftArm_leftElbow", 
+        "rightArm_rightElbow", "leftElbow_leftHand", "rightElbow_rightHand",
+        "leftLeg_leftKnee", "rightLeg_rightKnee", "leftKnee_leftFoot", "rightKnee_rightFoot",
+        "torso_lowerTorso"
+    }
+    
+    for _, lineName in ipairs(lineNames) do
+        local line = Drawing.new("Line")
+        line.Thickness = ESP_SETTINGS.LINE_THICKNESS
+        line.Color = ESP_SETTINGS.SKELETON_COLOR
+        line.Transparency = 1
+        line.Visible = false
+        esp.lines[lineName] = line
+    end
+    
+    -- Name text
+    esp.name = Drawing.new("Text")
+    esp.name.Size = ESP_SETTINGS.TEXT_SIZE
+    esp.name.Center = true
+    esp.name.Outline = ESP_SETTINGS.TEXT_OUTLINE
+    esp.name.OutlineColor = Color3.new(0, 0, 0)
+    esp.name.Color = Color3.fromRGB(255, 255, 255)
+    esp.name.Visible = false
+    
+    -- Health bar
+    esp.healthBar = Drawing.new("Square")
+    esp.healthBar.Thickness = 1
+    esp.healthBar.Filled = true
+    esp.healthBar.Transparency = 0.8
+    esp.healthBar.Visible = false
+    
+    -- Health bar background
+    esp.healthBg = Drawing.new("Square")
+    esp.healthBg.Thickness = 1
+    esp.healthBg.Filled = true
+    esp.healthBg.Color = Color3.fromRGB(50, 50, 50)
+    esp.healthBg.Transparency = 0.5
+    esp.healthBg.Visible = false
+    
+    return esp
+end
+
+local function getPlayerColor(player)
+    if not player.Team or not localPlayer.Team then
+        return ESP_SETTINGS.NEUTRAL_COLOR
+    end
+    return player.Team == localPlayer.Team and ESP_SETTINGS.TEAMMATE_COLOR or ESP_SETTINGS.ENEMY_COLOR
+end
+
+local function worldToScreen(position)
+    local screenPos, onScreen = camera:WorldToViewportPoint(position)
+    return Vector2.new(screenPos.X, screenPos.Y), onScreen and screenPos.Z > 0
+end
+
+local function updateSkeletonESP()
+    pcall(function()
+        for player, esp in pairs(espObjects) do
+            if player and player.Character and player ~= localPlayer then
+                local character = player.Character
+                
+                if isValidCharacter(character, player) then
+                    local health, maxHealth = getCharacterHealth(character)
+                    local bodyParts = findBodyParts(character)
+                    
+                    if health > 0 and next(bodyParts) and espEnabled then
+                        local playerColor = getPlayerColor(player)
+                        local skeletonColor = playerColor
+                        
+                        -- Update skeleton lines
+                        local connections = {
+                            head_torso = {bodyParts.head, bodyParts.upperTorso},
+                            torso_lowerTorso = {bodyParts.upperTorso, bodyParts.lowerTorso},
+                            torso_leftArm = {bodyParts.upperTorso, bodyParts.leftShoulder},
+                            torso_rightArm = {bodyParts.upperTorso, bodyParts.rightShoulder},
+                            torso_leftLeg = {bodyParts.lowerTorso or bodyParts.upperTorso, bodyParts.leftHip},
+                            torso_rightLeg = {bodyParts.lowerTorso or bodyParts.upperTorso, bodyParts.rightHip},
+                            leftArm_leftElbow = {bodyParts.leftShoulder, bodyParts.leftElbow},
+                            rightArm_rightElbow = {bodyParts.rightShoulder, bodyParts.rightElbow},
+                            leftElbow_leftHand = {bodyParts.leftElbow, bodyParts.leftHand},
+                            rightElbow_rightHand = {bodyParts.rightElbow, bodyParts.rightHand},
+                            leftLeg_leftKnee = {bodyParts.leftHip, bodyParts.leftKnee},
+                            rightLeg_rightKnee = {bodyParts.rightHip, bodyParts.rightKnee},
+                            leftKnee_leftFoot = {bodyParts.leftKnee, bodyParts.leftFoot},
+                            rightKnee_rightFoot = {bodyParts.rightKnee, bodyParts.rightFoot}
+                        }
+                        
+                        local anyVisible = false
+                        for lineName, connection in pairs(connections) do
+                            local part1, part2 = connection[1], connection[2]
+                            local line = esp.lines[lineName]
+                            
+                            if part1 and part2 and line then
+                                local pos1, onScreen1 = worldToScreen(part1.Position)
+                                local pos2, onScreen2 = worldToScreen(part2.Position)
+                                
+                                if onScreen1 and onScreen2 then
+                                    -- Check distance
+                                    local distance = (camera.CFrame.Position - part1.Position).Magnitude
+                                    if distance <= ESP_SETTINGS.MAX_DISTANCE then
+                                        line.From = pos1
+                                        line.To = pos2
+                                        line.Color = skeletonColor
+                                        line.Visible = true
+                                        anyVisible = true
+                                    else
+                                        line.Visible = false
+                                    end
+                                else
+                                    line.Visible = false
+                                end
+                            else
+                                if line then
+                                    line.Visible = false
+                                end
+                            end
+                        end
+                        
+                        -- Update name tag (position it above the head or torso)
+                        local namePos = bodyParts.head or bodyParts.upperTorso
+                        if namePos and anyVisible then
+                            local screenPos, onScreen = worldToScreen(namePos.Position + Vector3.new(0, 3, 0))
+                            if onScreen then
+                                esp.name.Position = screenPos
+                                esp.name.Text = player.Name or "Unknown"
+                                esp.name.Color = playerColor
+                                esp.name.Visible = true
+                            else
+                                esp.name.Visible = false
+                            end
+                        else
+                            esp.name.Visible = false
+                        end
+                        
+                        -- Update health bar
+                        if anyVisible and namePos then
+                            local screenPos, onScreen = worldToScreen(namePos.Position)
+                            if onScreen then
+                                local healthPercent = health / maxHealth
+                                local healthBarHeight = 60
+                                local healthBarWidth = ESP_SETTINGS.HEALTH_BAR_WIDTH
+                                local healthBarX = screenPos.X - 25
+                                local healthBarY = screenPos.Y - healthBarHeight/2
+                                
+                                esp.healthBg.Visible = true
+                                esp.healthBg.Position = Vector2.new(healthBarX, healthBarY)
+                                esp.healthBg.Size = Vector2.new(healthBarWidth, healthBarHeight)
+                                
+                                esp.healthBar.Visible = true
+                                esp.healthBar.Position = Vector2.new(healthBarX, healthBarY + healthBarHeight * (1 - healthPercent))
+                                esp.healthBar.Size = Vector2.new(healthBarWidth, healthBarHeight * healthPercent)
+                                
+                                if healthPercent > 0.6 then
+                                    esp.healthBar.Color = Color3.fromRGB(0, 255, 0)
+                                elseif healthPercent > 0.3 then
+                                    esp.healthBar.Color = Color3.fromRGB(255, 255, 0)
+                                else
+                                    esp.healthBar.Color = Color3.fromRGB(255, 0, 0)
+                                end
+                            else
+                                esp.healthBar.Visible = false
+                                esp.healthBg.Visible = false
+                            end
+                        else
+                            esp.healthBar.Visible = false
+                            esp.healthBg.Visible = false
+                        end
+                    else
+                        -- Hide all ESP elements
+                        for _, line in pairs(esp.lines) do
+                            line.Visible = false
+                        end
+                        esp.name.Visible = false
+                        esp.healthBar.Visible = false
+                        esp.healthBg.Visible = false
+                    end
+                else
+                    -- Hide all ESP elements for invalid characters
+                    for _, line in pairs(esp.lines) do
+                        line.Visible = false
+                    end
+                    esp.name.Visible = false
+                    esp.healthBar.Visible = false
+                    esp.healthBg.Visible = false
+                end
+            end
+        end
+    end)
+end
+
+local function cleanupSkeletonESP(esp)
+    for _, line in pairs(esp.lines) do
+        line:Remove()
+    end
+    esp.name:Remove()
+    esp.healthBar:Remove()
+    esp.healthBg:Remove()
+end
+
+-- Toggle ESP
+local function toggleESP()
+    espEnabled = not espEnabled
+    ESPButton.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
+    ESPButton.BackgroundColor3 = espEnabled and Color3.fromRGB(65, 170, 65) or Color3.fromRGB(45, 45, 45)
+    
+    if espEnabled then
+        espConnection = RunService.RenderStepped:Connect(updateSkeletonESP)
+    else
+        if espConnection then
+            espConnection:Disconnect()
+            espConnection = nil
+        end
+        
+        for _, esp in pairs(espObjects) do
+            for _, line in pairs(esp.lines) do
+                line.Visible = false
+            end
+            esp.name.Visible = false
+            esp.healthBar.Visible = false
+            esp.healthBg.Visible = false
+        end
+    end
+end
+
+-- Button Events
+ESPButton.MouseButton1Click:Connect(toggleESP)
+FBButton.MouseButton1Click:Connect(toggleFullBright)
+
+-- Initialize ESP for existing players with protection
+pcall(function()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            espObjects[player] = createSkeletonESP()
+        end
+    end
+end)
+
+Players.PlayerAdded:Connect(function(player)
+    pcall(function()
+        if player ~= localPlayer then
+            espObjects[player] = createSkeletonESP()
+        end
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    pcall(function()
+        if espObjects[player] then
+            cleanupSkeletonESP(espObjects[player])
+            espObjects[player] = nil
+        end
+    end)
+end)
+
+ScreenGui.AncestryChanged:Connect(function()
+    if not ScreenGui.Parent then
+        for _, esp in pairs(espObjects) do
+            cleanupSkeletonESP(esp)
+        end
+        if espConnection then
+            espConnection:Disconnect()
+        end
+        if fbConnection then
+            fbConnection:Disconnect()
+        end
+    end
+end)
