@@ -1,0 +1,875 @@
+-- Enhanced Hitbox Expander Script with Team Check and Advanced Features
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
+local Teams = game:GetService("Teams")
+
+-- Variables
+local player = Players.LocalPlayer
+local hitboxSize = Vector3.new(9, 9, 9)
+local hitboxesExpanded = false
+local friends = {}
+local minimized = false
+local teamCheckEnabled = true
+local visualizeHitboxes = false
+
+-- GUI Size Constants (IMPORTANT: Change this if you modify MainFrame size)
+local EXPANDED_HEIGHT = 540  -- Current full size
+local MINIMIZED_HEIGHT = 40  -- Title bar only
+
+-- GUI Creation
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "HitboxExpanderGui"
+ScreenGui.Parent = game:GetService("CoreGui")
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 300, 0, EXPANDED_HEIGHT)
+MainFrame.Position = UDim2.new(0.8, -150, 0.5, -240)
+MainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = MainFrame
+
+-- Title Bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 40)
+TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleBarCorner = Instance.new("UICorner")
+TitleBarCorner.CornerRadius = UDim.new(0, 10)
+TitleBarCorner.Parent = TitleBar
+
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(0.7, 0, 1, 0)
+Title.Position = UDim2.new(0.05, 0, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "KUPAL HITBOX"
+Title.TextColor3 = Color3.new(1, 1, 1)
+Title.TextSize = 20
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Name = "MinimizeButton"
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Position = UDim2.new(0.85, 0, 0.1, 0)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+MinimizeButton.Text = "-"
+MinimizeButton.TextSize = 20
+MinimizeButton.TextColor3 = Color3.new(1, 1, 1)
+MinimizeButton.Parent = TitleBar
+
+local MinimizeCorner = Instance.new("UICorner")
+MinimizeCorner.CornerRadius = UDim.new(0, 5)
+MinimizeCorner.Parent = MinimizeButton
+
+-- Content Frame
+local ContentFrame = Instance.new("Frame")  
+ContentFrame.Name = "ContentFrame"
+ContentFrame.Size = UDim2.new(1, 0, 1, -40)
+ContentFrame.Position = UDim2.new(0, 0, 0, 40)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+-- Hitbox Size Controls
+local SizeControl = Instance.new("Frame")
+SizeControl.Name = "SizeControl"
+SizeControl.Size = UDim2.new(0.9, 0, 0, 60)
+SizeControl.Position = UDim2.new(0.05, 0, 0, 10)
+SizeControl.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+SizeControl.Parent = ContentFrame
+
+local SizeControlCorner = Instance.new("UICorner")
+SizeControlCorner.CornerRadius = UDim.new(0, 8)
+SizeControlCorner.Parent = SizeControl
+
+local SizeLabel = Instance.new("TextLabel")
+SizeLabel.Size = UDim2.new(1, 0, 0, 25)
+SizeLabel.BackgroundTransparency = 1
+SizeLabel.Text = "Hitbox Size: 9"
+SizeLabel.TextColor3 = Color3.new(1, 1, 1)
+SizeLabel.TextSize = 14
+SizeLabel.Font = Enum.Font.Gotham
+SizeLabel.Parent = SizeControl
+
+local SizeSlider = Instance.new("TextButton")
+SizeSlider.Name = "SizeSlider"
+SizeSlider.Size = UDim2.new(0.9, 0, 0, 6)
+SizeSlider.Position = UDim2.new(0.05, 0, 0.65, 0)
+SizeSlider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+SizeSlider.Text = ""
+SizeSlider.AutoButtonColor = false
+SizeSlider.Parent = SizeControl
+
+local SliderCorner = Instance.new("UICorner")
+SliderCorner.CornerRadius = UDim.new(1, 0)
+SliderCorner.Parent = SizeSlider
+
+local SliderFill = Instance.new("Frame")
+SliderFill.Size = UDim2.new(0.5, 0, 1, 0)
+SliderFill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+SliderFill.Parent = SizeSlider
+
+local SliderFillCorner = Instance.new("UICorner")
+SliderFillCorner.CornerRadius = UDim.new(1, 0)
+SliderFillCorner.Parent = SliderFill
+
+-- Part Selection Dropdown
+local PartSelection = Instance.new("Frame")
+PartSelection.Name = "PartSelection"
+PartSelection.Size = UDim2.new(0.9, 0, 0, 60)
+PartSelection.Position = UDim2.new(0.05, 0, 0, 80)
+PartSelection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+PartSelection.Parent = ContentFrame
+
+local PartSelectionCorner = Instance.new("UICorner")
+PartSelectionCorner.CornerRadius = UDim.new(0, 8)
+PartSelectionCorner.Parent = PartSelection
+
+local PartLabel = Instance.new("TextLabel")
+PartLabel.Size = UDim2.new(1, 0, 0, 25)
+PartLabel.BackgroundTransparency = 1
+PartLabel.Text = "Select Part to Expand:"
+PartLabel.TextColor3 = Color3.new(1, 1, 1)
+PartLabel.TextSize = 14
+PartLabel.Font = Enum.Font.Gotham
+PartLabel.Parent = PartSelection
+
+local DropdownButton = Instance.new("TextButton")
+DropdownButton.Name = "DropdownButton"
+DropdownButton.Size = UDim2.new(0.9, 0, 0, 25)
+DropdownButton.Position = UDim2.new(0.05, 0, 0.5, 0)
+DropdownButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+DropdownButton.Text = "Body"
+DropdownButton.TextColor3 = Color3.new(1, 1, 1)
+DropdownButton.Parent = PartSelection
+
+local DropdownCorner = Instance.new("UICorner")
+DropdownCorner.CornerRadius = UDim.new(0, 4)
+DropdownCorner.Parent = DropdownButton
+
+local DropdownMenu = Instance.new("Frame")
+DropdownMenu.Name = "DropdownMenu"
+DropdownMenu.Size = UDim2.new(0.9, 0, 0, 50)
+DropdownMenu.Position = UDim2.new(0.05, 0, 1.1, 0)
+DropdownMenu.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+DropdownMenu.Visible = false
+DropdownMenu.ZIndex = 2
+DropdownMenu.Parent = PartSelection
+
+local DropdownMenuCorner = Instance.new("UICorner")
+DropdownMenuCorner.CornerRadius = UDim.new(0, 4)
+DropdownMenuCorner.Parent = DropdownMenu
+
+local options = {"Body", "Head"}
+local selectedPart = "Body"
+
+-- NEW: Team Check Toggle
+local TeamCheckFrame = Instance.new("Frame")
+TeamCheckFrame.Name = "TeamCheckFrame"
+TeamCheckFrame.Size = UDim2.new(0.9, 0, 0, 50)
+TeamCheckFrame.Position = UDim2.new(0.05, 0, 0, 150)
+TeamCheckFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TeamCheckFrame.Parent = ContentFrame
+
+local TeamCheckCorner = Instance.new("UICorner")
+TeamCheckCorner.CornerRadius = UDim.new(0, 8)
+TeamCheckCorner.Parent = TeamCheckFrame
+
+local TeamCheckLabel = Instance.new("TextLabel")
+TeamCheckLabel.Size = UDim2.new(0.6, 0, 1, 0)
+TeamCheckLabel.Position = UDim2.new(0.05, 0, 0, 0)
+TeamCheckLabel.BackgroundTransparency = 1
+TeamCheckLabel.Text = "Team Check"
+TeamCheckLabel.TextColor3 = Color3.new(1, 1, 1)
+TeamCheckLabel.TextSize = 14
+TeamCheckLabel.Font = Enum.Font.Gotham
+TeamCheckLabel.TextXAlignment = Enum.TextXAlignment.Left
+TeamCheckLabel.Parent = TeamCheckFrame
+
+local TeamCheckToggle = Instance.new("TextButton")
+TeamCheckToggle.Size = UDim2.new(0.3, 0, 0.6, 0)
+TeamCheckToggle.Position = UDim2.new(0.65, 0, 0.2, 0)
+TeamCheckToggle.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+TeamCheckToggle.Text = "ON"
+TeamCheckToggle.TextColor3 = Color3.new(1, 1, 1)
+TeamCheckToggle.Font = Enum.Font.GothamBold
+TeamCheckToggle.TextSize = 14
+TeamCheckToggle.Parent = TeamCheckFrame
+
+local TeamCheckToggleCorner = Instance.new("UICorner")
+TeamCheckToggleCorner.CornerRadius = UDim.new(0, 6)
+TeamCheckToggleCorner.Parent = TeamCheckToggle
+
+-- NEW: Visualize Hitboxes Toggle
+local VisualizeFrame = Instance.new("Frame")
+VisualizeFrame.Name = "VisualizeFrame"
+VisualizeFrame.Size = UDim2.new(0.9, 0, 0, 50)
+VisualizeFrame.Position = UDim2.new(0.05, 0, 0, 210)
+VisualizeFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+VisualizeFrame.Parent = ContentFrame
+
+local VisualizeCorner = Instance.new("UICorner")
+VisualizeCorner.CornerRadius = UDim.new(0, 8)
+VisualizeCorner.Parent = VisualizeFrame
+
+local VisualizeLabel = Instance.new("TextLabel")
+VisualizeLabel.Size = UDim2.new(0.6, 0, 1, 0)
+VisualizeLabel.Position = UDim2.new(0.05, 0, 0, 0)
+VisualizeLabel.BackgroundTransparency = 1
+VisualizeLabel.Text = "Show Hitboxes"
+VisualizeLabel.TextColor3 = Color3.new(1, 1, 1)
+VisualizeLabel.TextSize = 14
+VisualizeLabel.Font = Enum.Font.Gotham
+VisualizeLabel.TextXAlignment = Enum.TextXAlignment.Left
+VisualizeLabel.Parent = VisualizeFrame
+
+local VisualizeToggle = Instance.new("TextButton")
+VisualizeToggle.Size = UDim2.new(0.3, 0, 0.6, 0)
+VisualizeToggle.Position = UDim2.new(0.65, 0, 0.2, 0)
+VisualizeToggle.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+VisualizeToggle.Text = "OFF"
+VisualizeToggle.TextColor3 = Color3.new(1, 1, 1)
+VisualizeToggle.Font = Enum.Font.GothamBold
+VisualizeToggle.TextSize = 14
+VisualizeToggle.Parent = VisualizeFrame
+
+local VisualizeToggleCorner = Instance.new("UICorner")
+VisualizeToggleCorner.CornerRadius = UDim.new(0, 6)
+VisualizeToggleCorner.Parent = VisualizeToggle
+
+-- Player List
+local PlayerListFrame = Instance.new("ScrollingFrame")
+PlayerListFrame.Name = "PlayerList"
+PlayerListFrame.Size = UDim2.new(0.9, 0, 0.32, 0)
+PlayerListFrame.Position = UDim2.new(0.05, 0, 0.53, 0)
+PlayerListFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+PlayerListFrame.BorderSizePixel = 0
+PlayerListFrame.ScrollBarThickness = 4
+PlayerListFrame.Parent = ContentFrame
+
+local ListCorner = Instance.new("UICorner")
+ListCorner.CornerRadius = UDim.new(0, 8)
+ListCorner.Parent = PlayerListFrame
+
+-- Toggle Button
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ToggleButton"
+ToggleButton.Size = UDim2.new(0.9, 0, 0, 40)
+ToggleButton.Position = UDim2.new(0.05, 0, 0.87, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+ToggleButton.Text = "Enable Hitboxes"
+ToggleButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 16
+ToggleButton.Parent = ContentFrame
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(0, 8)
+ToggleCorner.Parent = ToggleButton
+
+-- Helper function to check if player is on same team
+local function isSameTeam(otherPlayer)
+    if not teamCheckEnabled then return false end
+    if not player.Team or not otherPlayer.Team then return false end
+    return player.Team == otherPlayer.Team
+end
+
+-- Helper function to create hitbox visualization
+local function createHitboxVisualization(part)
+    local existingBox = part:FindFirstChild("HitboxVisualization")
+    if existingBox then existingBox:Destroy() end
+    
+    if not visualizeHitboxes then return end
+    
+    local box = Instance.new("SelectionBox")
+    box.Name = "HitboxVisualization"
+    box.Adornee = part
+    box.Color3 = Color3.fromRGB(255, 0, 0)
+    box.LineThickness = 0.05
+    box.Transparency = 0.5
+    box.Parent = part
+end
+
+-- IMPROVED: Function to properly configure head hitbox without movement issues
+local function configureHeadHitbox(head, size)
+    -- Store original properties if not already stored
+    if not head:FindFirstChild("OriginalProperties") then
+        local originalProps = Instance.new("Folder")
+        originalProps.Name = "OriginalProperties"
+        originalProps.Parent = head
+        
+        local originalSize = Instance.new("Vector3Value")
+        originalSize.Name = "Size"
+        originalSize.Value = head.Size
+        originalSize.Parent = originalProps
+        
+        local originalMassless = Instance.new("BoolValue")
+        originalMassless.Name = "Massless"
+        originalMassless.Value = head.Massless
+        originalMassless.Parent = originalProps
+    end
+    
+    -- Apply expanded hitbox settings
+    head.Size = size
+    head.Transparency = 0.5
+    head.Material = Enum.Material.ForceField
+    head.CanCollide = false
+    head.Massless = true  -- CRITICAL: Prevents physics issues
+    
+    createHitboxVisualization(head)
+end
+
+-- IMPROVED: Function to reset head hitbox properly
+local function resetHeadHitbox(head)
+    local originalProps = head:FindFirstChild("OriginalProperties")
+    
+    if originalProps and originalProps:FindFirstChild("Size") then
+        head.Size = originalProps.Size.Value
+        head.Massless = originalProps.Massless.Value
+    else
+        head.Size = Vector3.new(1, 1, 1)
+        head.Massless = false
+    end
+    
+    head.Transparency = 0
+    head.Material = Enum.Material.Plastic
+    head.CanCollide = true
+    
+    local viz = head:FindFirstChild("HitboxVisualization")
+    if viz then viz:Destroy() end
+    
+    -- Clean up stored properties
+    if originalProps then originalProps:Destroy() end
+end
+
+-- FIXED: Reset ALL hitboxes function (both Body and Head)
+local function resetAllHitboxes()
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character then
+            -- Reset Body hitbox
+            local hrp = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.Size = Vector3.new(2, 2, 1)
+                hrp.Transparency = 1
+                hrp.Material = Enum.Material.Plastic
+                hrp.CanCollide = true
+                local viz = hrp:FindFirstChild("HitboxVisualization")
+                if viz then viz:Destroy() end
+            end
+            
+            -- Reset Head hitbox
+            local head = otherPlayer.Character:FindFirstChild("Head")
+            if head then
+                resetHeadHitbox(head)
+            end
+        end
+    end
+end
+
+-- Functions
+local function updatePlayerList()
+    for _, child in pairs(PlayerListFrame:GetChildren()) do
+        if child:IsA("Frame") then
+            child:Destroy()
+        end
+    end
+    
+    local yPosition = 5
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= player then
+            local playerEntry = Instance.new("Frame")
+            playerEntry.Size = UDim2.new(0.95, 0, 0, 35)
+            playerEntry.Position = UDim2.new(0.025, 0, 0, yPosition)
+            playerEntry.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            playerEntry.Parent = PlayerListFrame
+            
+            local entryCorner = Instance.new("UICorner")
+            entryCorner.CornerRadius = UDim.new(0, 6)
+            entryCorner.Parent = playerEntry
+            
+            local teamIndicator = Instance.new("Frame")
+            teamIndicator.Size = UDim2.new(0, 5, 0.8, 0)
+            teamIndicator.Position = UDim2.new(0, 0, 0.1, 0)
+            teamIndicator.BorderSizePixel = 0
+            if plr.Team then
+                teamIndicator.BackgroundColor3 = plr.Team.TeamColor.Color
+            else
+                teamIndicator.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+            end
+            teamIndicator.Parent = playerEntry
+            
+            local playerName = Instance.new("TextLabel")
+            playerName.Size = UDim2.new(0.55, 0, 1, 0)
+            playerName.Position = UDim2.new(0.08, 0, 0, 0)
+            playerName.BackgroundTransparency = 1
+            playerName.Text = plr.Name
+            playerName.TextColor3 = Color3.new(1, 1, 1)
+            playerName.TextXAlignment = Enum.TextXAlignment.Left
+            playerName.Font = Enum.Font.Gotham
+            playerName.TextSize = 13
+            playerName.Parent = playerEntry
+            
+            local friendButton = Instance.new("TextButton")
+            friendButton.Size = UDim2.new(0.3, 0, 0.7, 0)
+            friendButton.Position = UDim2.new(0.67, 0, 0.15, 0)
+            friendButton.BackgroundColor3 = friends[plr.Name] and Color3.fromRGB(170, 0, 0) or Color3.fromRGB(0, 170, 0)
+            friendButton.Text = friends[plr.Name] and "Remove" or "Add"
+            friendButton.TextColor3 = Color3.new(1, 1, 1)
+            friendButton.Font = Enum.Font.Gotham
+            friendButton.TextSize = 12
+            friendButton.Parent = playerEntry
+            
+            local buttonCorner = Instance.new("UICorner")
+            buttonCorner.CornerRadius = UDim.new(0, 4)
+            buttonCorner.Parent = friendButton
+            
+            friendButton.MouseButton1Click:Connect(function()
+                if friends[plr.Name] then
+                    friends[plr.Name] = nil
+                    friendButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+                    friendButton.Text = "Add"
+                else
+                    friends[plr.Name] = true
+                    friendButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+                    friendButton.Text = "Remove"
+                end
+                
+                if hitboxesExpanded then
+                    expandHitboxes(hitboxSize)
+                end
+            end)
+            
+            yPosition = yPosition + 40
+        end
+    end
+    
+    PlayerListFrame.CanvasSize = UDim2.new(0, 0, 0, yPosition)
+end
+
+local function expandHitboxes(size)
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and not friends[otherPlayer.Name] and 
+           not isSameTeam(otherPlayer) and otherPlayer.Character then
+            
+            if selectedPart == "Body" then
+                local hrp = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.Size = size
+                    hrp.Transparency = 0.5
+                    hrp.Material = Enum.Material.ForceField
+                    hrp.CanCollide = false
+                    createHitboxVisualization(hrp)
+                end
+            elseif selectedPart == "Head" then
+                local head = otherPlayer.Character:FindFirstChild("Head")
+                if head then
+                    configureHeadHitbox(head, size)
+                end
+            end
+        end
+    end
+    hitboxesExpanded = true
+end
+
+local function resetHitboxes()
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character then
+            if selectedPart == "Body" then
+                local hrp = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.Size = Vector3.new(2, 2, 1)
+                    hrp.Transparency = 1
+                    hrp.Material = Enum.Material.Plastic
+                    hrp.CanCollide = true
+                    local viz = hrp:FindFirstChild("HitboxVisualization")
+                    if viz then viz:Destroy() end
+                end
+            elseif selectedPart == "Head" then
+                local head = otherPlayer.Character:FindFirstChild("Head")
+                if head then
+                    resetHeadHitbox(head)
+                end
+            end
+        end
+    end
+    hitboxesExpanded = false
+end
+
+-- FIXED: Dropdown functionality with proper hitbox switching
+for i, option in ipairs(options) do
+    local OptionButton = Instance.new("TextButton")
+    OptionButton.Size = UDim2.new(1, 0, 0, 25)
+    OptionButton.Position = UDim2.new(0, 0, 0, (i-1) * 25)
+    OptionButton.BackgroundTransparency = 1
+    OptionButton.Text = option
+    OptionButton.TextColor3 = Color3.new(1, 1, 1)
+    OptionButton.ZIndex = 2
+    OptionButton.Parent = DropdownMenu
+    
+    OptionButton.MouseButton1Click:Connect(function()
+        -- NEW: Reset ALL hitboxes before changing part
+        if hitboxesExpanded then
+            resetAllHitboxes()
+        end
+        
+        selectedPart = option
+        DropdownButton.Text = option
+        DropdownMenu.Visible = false
+        
+        -- Re-apply hitboxes with the new part selection
+        if hitboxesExpanded then
+            expandHitboxes(hitboxSize)
+        end
+    end)
+end
+
+DropdownButton.MouseButton1Click:Connect(function()
+    DropdownMenu.Visible = not DropdownMenu.Visible
+end)
+
+-- Team Check Toggle functionality
+TeamCheckToggle.MouseButton1Click:Connect(function()
+    teamCheckEnabled = not teamCheckEnabled
+    TeamCheckToggle.Text = teamCheckEnabled and "ON" or "OFF"
+    TeamCheckToggle.BackgroundColor3 = teamCheckEnabled and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    
+    if hitboxesExpanded then
+        resetHitboxes()
+        expandHitboxes(hitboxSize)
+    end
+    
+    StarterGui:SetCore("SendNotification", {
+        Title = "Team Check",
+        Text = teamCheckEnabled and "Enabled - Teammates protected" or "Disabled - All players affected",
+        Duration = 3
+    })
+end)
+
+-- Visualize Toggle functionality
+VisualizeToggle.MouseButton1Click:Connect(function()
+    visualizeHitboxes = not visualizeHitboxes
+    VisualizeToggle.Text = visualizeHitboxes and "ON" or "OFF"
+    VisualizeToggle.BackgroundColor3 = visualizeHitboxes and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    
+    if hitboxesExpanded then
+        expandHitboxes(hitboxSize)
+    end
+end)
+
+-- Minimize/Maximize functionality
+MinimizeButton.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    local targetSize = minimized and UDim2.new(0, 300, 0, MINIMIZED_HEIGHT) or UDim2.new(0, 300, 0, EXPANDED_HEIGHT)
+    local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    
+    local tween = TweenService:Create(MainFrame, tweenInfo, {Size = targetSize})
+    tween:Play()
+    
+    MinimizeButton.Text = minimized and "+" or "-"
+    ContentFrame.Visible = not minimized
+end)
+
+-- FIXED: Size Slider functionality (minimum changed from 3 to 2)
+local isDragging = false
+
+SizeSlider.MouseButton1Down:Connect(function()
+    isDragging = true
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isDragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement and isDragging then
+        local sliderPosition = math.clamp(
+            (input.Position.X - SizeSlider.AbsolutePosition.X) / SizeSlider.AbsoluteSize.X,
+            0,
+            1
+        )
+        
+        SliderFill.Size = UDim2.new(sliderPosition, 0, 1, 0)
+        -- Changed formula: minimum is now 2 instead of 3
+        local newSize = math.floor(2 + (sliderPosition * 98))  -- Range: 2 to 100
+        hitboxSize = Vector3.new(newSize, newSize, newSize)
+        SizeLabel.Text = "Hitbox Size: " .. newSize
+        
+        if hitboxesExpanded then
+            expandHitboxes(hitboxSize)
+        end
+    end
+end)
+
+-- FIXED: Toggle Button functionality with proper reset
+ToggleButton.MouseButton1Click:Connect(function()
+    if not hitboxesExpanded then
+        expandHitboxes(hitboxSize)
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+        ToggleButton.Text = "Disable Hitboxes"
+    else
+        -- Use resetAllHitboxes to ensure ALL parts are reset
+        resetAllHitboxes()
+        hitboxesExpanded = false
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        ToggleButton.Text = "Enable Hitboxes"
+    end
+end)
+
+-- Update player list when players join/leave
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(updatePlayerList)
+
+-- Update list when teams change
+Players.LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+    updatePlayerList()
+    if hitboxesExpanded then
+        resetHitboxes()
+        expandHitboxes(hitboxSize)
+    end
+end)
+
+-- Initial setup
+updatePlayerList()
+
+-- Keybind to toggle GUI visibility (Right Control)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end)
+
+-- Initial notification
+StarterGui:SetCore("SendNotification", {
+    Title = "KUPAL HITBOX",
+    Text = "Loaded! Press Right Control to toggle GUI",
+    Duration = 5
+})
+
+-- Character added handling
+local function onCharacterAdded(character, playerName, plr)
+    task.wait(0.5)
+    if hitboxesExpanded and not friends[playerName] and not isSameTeam(plr) then
+        if selectedPart == "Body" then
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.Size = hitboxSize
+                hrp.Transparency = 0.5
+                hrp.Material = Enum.Material.ForceField
+                hrp.CanCollide = false
+                createHitboxVisualization(hrp)
+                
+                hrp:GetPropertyChangedSignal("Size"):Connect(function()
+                    if hitboxesExpanded and not friends[playerName] and not isSameTeam(plr) and selectedPart == "Body" then
+                        if hrp.Size ~= hitboxSize then
+                            hrp.Size = hitboxSize
+                            hrp.Transparency = 0.5
+                            hrp.Material = Enum.Material.ForceField
+                            hrp.CanCollide = false
+                        end
+                    end
+                end)
+            end
+        elseif selectedPart == "Head" then
+            local head = character:FindFirstChild("Head")
+            if head then
+                configureHeadHitbox(head, hitboxSize)
+                
+                head:GetPropertyChangedSignal("Size"):Connect(function()
+                    if hitboxesExpanded and not friends[playerName] and not isSameTeam(plr) and selectedPart == "Head" then
+                        if head.Size ~= hitboxSize then
+                            configureHeadHitbox(head, hitboxSize)
+                        end
+                    end
+                end)
+                
+                -- Monitor Massless property to ensure it stays true
+                head:GetPropertyChangedSignal("Massless"):Connect(function()
+                    if hitboxesExpanded and not friends[playerName] and not isSameTeam(plr) and selectedPart == "Head" then
+                        if not head.Massless then
+                            head.Massless = true
+                        end
+                    end
+                end)
+            end
+        end
+    end
+end
+
+-- Connect character added event for all players
+for _, otherPlayer in pairs(Players:GetPlayers()) do
+    if otherPlayer ~= player then
+        if otherPlayer.Character then
+            onCharacterAdded(otherPlayer.Character, otherPlayer.Name, otherPlayer)
+        end
+        otherPlayer.CharacterAdded:Connect(function(char)
+            onCharacterAdded(char, otherPlayer.Name, otherPlayer)
+        end)
+        
+        -- Monitor team changes
+        otherPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+            updatePlayerList()
+            if hitboxesExpanded then
+                resetHitboxes()
+                expandHitboxes(hitboxSize)
+            end
+        end)
+    end
+end
+
+-- Connect PlayerAdded event
+Players.PlayerAdded:Connect(function(newPlayer)
+    if newPlayer ~= player then
+        newPlayer.CharacterAdded:Connect(function(char)
+            onCharacterAdded(char, newPlayer.Name, newPlayer)
+        end)
+        
+        newPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+            updatePlayerList()
+            if hitboxesExpanded then
+                resetHitboxes()
+                expandHitboxes(hitboxSize)
+            end
+        end)
+    end
+    updatePlayerList()
+end)
+
+-- Add hover effects for buttons
+local function addHoverEffect(button)
+    local originalColor = button.BackgroundColor3
+    
+    button.MouseEnter:Connect(function()
+        TweenService:Create(button, TweenInfo.new(0.2), {
+            BackgroundColor3 = originalColor:Lerp(Color3.new(1, 1, 1), 0.2)
+        }):Play()
+    end)
+    
+    button.MouseLeave:Connect(function()
+        TweenService:Create(button, TweenInfo.new(0.2), {
+            BackgroundColor3 = originalColor
+        }):Play()
+    end)
+end
+
+addHoverEffect(ToggleButton)
+addHoverEffect(MinimizeButton)
+addHoverEffect(TeamCheckToggle)
+addHoverEffect(VisualizeToggle)
+
+-- Create shadow effect for main frame
+local Shadow = Instance.new("ImageLabel")
+Shadow.Name = "Shadow"
+Shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+Shadow.BackgroundTransparency = 1
+Shadow.Position = UDim2.new(0.5, 0, 0.5, 0)
+Shadow.Size = UDim2.new(1, 30, 1, 30)
+Shadow.Image = "rbxassetid://5028857084"
+Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+Shadow.ImageTransparency = 0.6
+Shadow.ScaleType = Enum.ScaleType.Slice
+Shadow.SliceCenter = Rect.new(24, 24, 276, 276)
+Shadow.ZIndex = 0
+Shadow.Parent = MainFrame
+
+-- IMPROVED: Auto-refresh loop to maintain hitboxes
+local function autoRefresh()
+    while true do
+        if hitboxesExpanded then
+            for _, otherPlayer in pairs(Players:GetPlayers()) do
+                if otherPlayer ~= player and not friends[otherPlayer.Name] and 
+                   not isSameTeam(otherPlayer) and otherPlayer.Character then
+                    
+                    if selectedPart == "Body" then
+                        local hrp = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp and hrp.Size ~= hitboxSize then
+                            hrp.Size = hitboxSize
+                            hrp.Transparency = 0.5
+                            hrp.Material = Enum.Material.ForceField
+                            hrp.CanCollide = false
+                            createHitboxVisualization(hrp)
+                        end
+                    elseif selectedPart == "Head" then
+                        local head = otherPlayer.Character:FindFirstChild("Head")
+                        if head then
+                            -- Verify head hitbox is properly configured
+                            if head.Size ~= hitboxSize or not head.Massless then
+                                configureHeadHitbox(head, hitboxSize)
+                            end
+                        end
+                    end
+                elseif otherPlayer ~= player and (friends[otherPlayer.Name] or isSameTeam(otherPlayer)) and otherPlayer.Character then
+                    -- Reset hitboxes for friends and teammates
+                    local hrp = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp and hrp.Size ~= Vector3.new(2, 2, 1) then
+                        hrp.Size = Vector3.new(2, 2, 1)
+                        hrp.Transparency = 1
+                        hrp.Material = Enum.Material.Plastic
+                        hrp.CanCollide = true
+                        local viz = hrp:FindFirstChild("HitboxVisualization")
+                        if viz then viz:Destroy() end
+                    end
+                    
+                    local head = otherPlayer.Character:FindFirstChild("Head")
+                    if head then
+                        local originalProps = head:FindFirstChild("OriginalProperties")
+                        if originalProps then
+                            resetHeadHitbox(head)
+                        end
+                    end
+                end
+            end
+        else
+            -- FIXED: When hitboxes are disabled, ensure ALL parts are reset
+            for _, otherPlayer in pairs(Players:GetPlayers()) do
+                if otherPlayer ~= player and otherPlayer.Character then
+                    local hrp = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp and hrp.Size ~= Vector3.new(2, 2, 1) then
+                        hrp.Size = Vector3.new(2, 2, 1)
+                        hrp.Transparency = 1
+                        hrp.Material = Enum.Material.Plastic
+                        hrp.CanCollide = true
+                        local viz = hrp:FindFirstChild("HitboxVisualization")
+                        if viz then viz:Destroy() end
+                    end
+                    
+                    local head = otherPlayer.Character:FindFirstChild("Head")
+                    if head then
+                        local originalProps = head:FindFirstChild("OriginalProperties")
+                        if originalProps then
+                            resetHeadHitbox(head)
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end
+
+-- Start the auto-refresh loop
+coroutine.wrap(autoRefresh)()
+
+-- Final notification
+StarterGui:SetCore("SendNotification", {
+    Title = "KUPAL HITBOX",
+    Text = "GAWA TO NI OWGAG TANG INA MO CHEATER!",
+    Duration = 3
+})
