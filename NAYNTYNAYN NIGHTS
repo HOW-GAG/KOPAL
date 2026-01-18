@@ -1,0 +1,564 @@
+-- 99 Nights in the Forest - Enhanced GUI Script with Grouped Item Selection
+local player = game.Players.LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
+local items = workspace:WaitForChild("Items")
+local rs = game:GetService("ReplicatedStorage")
+local runService = game:GetService("RunService")
+
+-- State variables
+local autoBringEnabled = false
+local espEnabled = false
+local espObjects = {}
+local selectedItemTypes = {} -- Stores which item types are selected
+local itemGroups = {} -- Stores actual item instances grouped by name
+local lastBringTime = 0
+local bringCooldown = 2 -- 2 seconds cooldown
+
+-- Create ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ForestGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 320, 0, 450)
+mainFrame.Position = UDim2.new(0.5, -160, 0.5, -225)
+mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.Parent = mainFrame
+
+-- Title Bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 35)
+titleBar.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = titleBar
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -70, 1, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "99 Nights Forest"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextSize = 16
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+
+-- Minimize Button
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Name = "MinimizeBtn"
+minimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+minimizeBtn.Position = UDim2.new(1, -65, 0, 2.5)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+minimizeBtn.Text = "-"
+minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeBtn.TextSize = 20
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.Parent = titleBar
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 5)
+minCorner.Parent = minimizeBtn
+
+-- Close Button
+local closeBtn = Instance.new("TextButton")
+closeBtn.Name = "CloseBtn"
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -32.5, 0, 2.5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 16
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 5)
+closeCorner.Parent = closeBtn
+
+-- Content Frame
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, -20, 1, -45)
+contentFrame.Position = UDim2.new(0, 10, 0, 40)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+
+-- Auto Bring Toggle
+local autoBringToggle = Instance.new("TextButton")
+autoBringToggle.Name = "AutoBringToggle"
+autoBringToggle.Size = UDim2.new(1, 0, 0, 35)
+autoBringToggle.Position = UDim2.new(0, 0, 0, 0)
+autoBringToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+autoBringToggle.Text = "Auto Bring: OFF"
+autoBringToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoBringToggle.TextSize = 14
+autoBringToggle.Font = Enum.Font.GothamSemibold
+autoBringToggle.Parent = contentFrame
+
+local toggleCorner1 = Instance.new("UICorner")
+toggleCorner1.CornerRadius = UDim.new(0, 6)
+toggleCorner1.Parent = autoBringToggle
+
+-- ESP Toggle
+local espToggle = Instance.new("TextButton")
+espToggle.Name = "ESPToggle"
+espToggle.Size = UDim2.new(1, 0, 0, 35)
+espToggle.Position = UDim2.new(0, 0, 0, 40)
+espToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+espToggle.Text = "Item ESP: OFF"
+espToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+espToggle.TextSize = 14
+espToggle.Font = Enum.Font.GothamSemibold
+espToggle.Parent = contentFrame
+
+local toggleCorner2 = Instance.new("UICorner")
+toggleCorner2.CornerRadius = UDim.new(0, 6)
+toggleCorner2.Parent = espToggle
+
+-- Item Selection Section
+local selectionLabel = Instance.new("TextLabel")
+selectionLabel.Size = UDim2.new(1, 0, 0, 25)
+selectionLabel.Position = UDim2.new(0, 0, 0, 85)
+selectionLabel.BackgroundTransparency = 1
+selectionLabel.Text = "Select Items to Bring:"
+selectionLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+selectionLabel.TextSize = 13
+selectionLabel.Font = Enum.Font.GothamBold
+selectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+selectionLabel.Parent = contentFrame
+
+-- Buttons Frame (Select All/None, Refresh)
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Size = UDim2.new(1, 0, 0, 30)
+buttonFrame.Position = UDim2.new(0, 0, 0, 110)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.Parent = contentFrame
+
+local selectAllBtn = Instance.new("TextButton")
+selectAllBtn.Size = UDim2.new(0.32, 0, 1, 0)
+selectAllBtn.Position = UDim2.new(0, 0, 0, 0)
+selectAllBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+selectAllBtn.Text = "All"
+selectAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+selectAllBtn.TextSize = 12
+selectAllBtn.Font = Enum.Font.GothamSemibold
+selectAllBtn.Parent = buttonFrame
+
+local allCorner = Instance.new("UICorner")
+allCorner.CornerRadius = UDim.new(0, 5)
+allCorner.Parent = selectAllBtn
+
+local selectNoneBtn = Instance.new("TextButton")
+selectNoneBtn.Size = UDim2.new(0.32, 0, 1, 0)
+selectNoneBtn.Position = UDim2.new(0.34, 0, 0, 0)
+selectNoneBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+selectNoneBtn.Text = "None"
+selectNoneBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+selectNoneBtn.TextSize = 12
+selectNoneBtn.Font = Enum.Font.GothamSemibold
+selectNoneBtn.Parent = buttonFrame
+
+local noneCorner = Instance.new("UICorner")
+noneCorner.CornerRadius = UDim.new(0, 5)
+noneCorner.Parent = selectNoneBtn
+
+local refreshBtn = Instance.new("TextButton")
+refreshBtn.Size = UDim2.new(0.32, 0, 1, 0)
+refreshBtn.Position = UDim2.new(0.68, 0, 0, 0)
+refreshBtn.BackgroundColor3 = Color3.fromRGB(50, 120, 200)
+refreshBtn.Text = "Refresh"
+refreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+refreshBtn.TextSize = 12
+refreshBtn.Font = Enum.Font.GothamSemibold
+refreshBtn.Parent = buttonFrame
+
+local refreshCorner = Instance.new("UICorner")
+refreshCorner.CornerRadius = UDim.new(0, 5)
+refreshCorner.Parent = refreshBtn
+
+-- Scrolling Frame for Items
+local itemScrollFrame = Instance.new("ScrollingFrame")
+itemScrollFrame.Name = "ItemScrollFrame"
+itemScrollFrame.Size = UDim2.new(1, 0, 0, 200)
+itemScrollFrame.Position = UDim2.new(0, 0, 0, 145)
+itemScrollFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+itemScrollFrame.BorderSizePixel = 0
+itemScrollFrame.ScrollBarThickness = 6
+itemScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
+itemScrollFrame.Parent = contentFrame
+
+local scrollCorner = Instance.new("UICorner")
+scrollCorner.CornerRadius = UDim.new(0, 6)
+scrollCorner.Parent = itemScrollFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 3)
+listLayout.Parent = itemScrollFrame
+
+-- Status Label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, 0, 0, 50)
+statusLabel.Position = UDim2.new(0, 0, 0, 355)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Ready - Select items to bring"
+statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+statusLabel.TextSize = 11
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextWrapped = true
+statusLabel.Parent = contentFrame
+
+-- Functions
+local function bring(item)
+    if not hrp then return end
+    local pos = hrp.CFrame * CFrame.new(0, 2, -10)
+    
+    pcall(function()
+        rs.RemoteEvents.RequestStartDraggingItem:FireServer(item)
+        
+        if item:IsA("Model") and item.PrimaryPart then
+            item:SetPrimaryPartCFrame(pos)
+        elseif item:IsA("BasePart") then
+            item.CFrame = pos
+        end
+        
+        rs.RemoteEvents.StopDraggingItem:FireServer(item)
+    end)
+end
+
+local function updateItemGroups()
+    itemGroups = {}
+    
+    for _, item in pairs(items:GetChildren()) do
+        local itemName = item.Name
+        
+        if not itemGroups[itemName] then
+            itemGroups[itemName] = {}
+        end
+        
+        table.insert(itemGroups[itemName], item)
+    end
+end
+
+local function updateESPColors()
+    for item, billboard in pairs(espObjects) do
+        local label = billboard:FindFirstChildOfClass("TextLabel")
+        if label then
+            label.TextColor3 = selectedItemTypes[item.Name] and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 255, 255)
+        end
+    end
+end
+
+local function createItemButton(itemName, count)
+    local itemBtn = Instance.new("TextButton")
+    itemBtn.Name = itemName
+    itemBtn.Size = UDim2.new(1, -6, 0, 30)
+    itemBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    itemBtn.Text = "☐ " .. itemName .. " (x" .. count .. ")"
+    itemBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    itemBtn.TextSize = 12
+    itemBtn.Font = Enum.Font.Gotham
+    itemBtn.TextXAlignment = Enum.TextXAlignment.Left
+    itemBtn.TextTruncate = Enum.TextTruncate.AtEnd
+    itemBtn.Parent = itemScrollFrame
+    
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 8)
+    padding.Parent = itemBtn
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 5)
+    btnCorner.Parent = itemBtn
+    
+    itemBtn.MouseButton1Click:Connect(function()
+        if selectedItemTypes[itemName] then
+            selectedItemTypes[itemName] = nil
+            itemBtn.Text = "☐ " .. itemName .. " (x" .. count .. ")"
+            itemBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        else
+            selectedItemTypes[itemName] = true
+            itemBtn.Text = "☑ " .. itemName .. " (x" .. count .. ")"
+            itemBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 150)
+        end
+        
+        updateESPColors()
+        
+        local selectedCount = 0
+        for _ in pairs(selectedItemTypes) do selectedCount = selectedCount + 1 end
+        statusLabel.Text = selectedCount .. " item type(s) selected"
+    end)
+    
+    return itemBtn
+end
+
+local function refreshItemList()
+    -- Clear existing buttons
+    for _, child in pairs(itemScrollFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    -- Update item groups
+    updateItemGroups()
+    
+    -- Sort item names alphabetically
+    local sortedNames = {}
+    for itemName, _ in pairs(itemGroups) do
+        table.insert(sortedNames, itemName)
+    end
+    table.sort(sortedNames)
+    
+    -- Create buttons for each unique item type
+    for _, itemName in ipairs(sortedNames) do
+        local itemList = itemGroups[itemName]
+        local btn = createItemButton(itemName, #itemList)
+        
+        -- Restore selection state
+        if selectedItemTypes[itemName] then
+            btn.Text = "☑ " .. itemName .. " (x" .. #itemList .. ")"
+            btn.BackgroundColor3 = Color3.fromRGB(50, 100, 150)
+        end
+    end
+    
+    -- Update canvas size
+    task.wait()
+    itemScrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 5)
+    
+    local count = 0
+    for _ in pairs(selectedItemTypes) do count = count + 1 end
+    
+    local totalItems = 0
+    for _ in pairs(itemGroups) do totalItems = totalItems + 1 end
+    
+    statusLabel.Text = "Found " .. totalItems .. " item type(s) - " .. count .. " selected"
+end
+
+local function createESP(item)
+    if espObjects[item] then return end
+    
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ItemESP"
+    billboard.Adornee = item:IsA("Model") and item.PrimaryPart or item
+    billboard.Size = UDim2.new(0, 150, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = screenGui
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = item.Name
+    label.TextColor3 = selectedItemTypes[item.Name] and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 255, 255)
+    label.TextSize = 14
+    label.Font = Enum.Font.GothamBold
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.Parent = billboard
+    
+    espObjects[item] = billboard
+end
+
+local function removeESP(item)
+    if espObjects[item] then
+        espObjects[item]:Destroy()
+        espObjects[item] = nil
+    end
+end
+
+local function updateESP()
+    if espEnabled then
+        for _, item in pairs(items:GetChildren()) do
+            createESP(item)
+        end
+    else
+        for item, billboard in pairs(espObjects) do
+            billboard:Destroy()
+        end
+        espObjects = {}
+    end
+end
+
+-- Dragging functionality
+local dragging = false
+local dragInput, mousePos, framePos
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        mousePos = input.Position
+        framePos = mainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+titleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+runService.Heartbeat:Connect(function()
+    if dragging and dragInput then
+        local delta = dragInput.Position - mousePos
+        mainFrame.Position = UDim2.new(
+            framePos.X.Scale,
+            framePos.X.Offset + delta.X,
+            framePos.Y.Scale,
+            framePos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- Button connections
+autoBringToggle.MouseButton1Click:Connect(function()
+    autoBringEnabled = not autoBringEnabled
+    autoBringToggle.Text = "Auto Bring: " .. (autoBringEnabled and "ON" or "OFF")
+    autoBringToggle.BackgroundColor3 = autoBringEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+    
+    if autoBringEnabled then
+        local count = 0
+        for _ in pairs(selectedItemTypes) do count = count + 1 end
+        if count == 0 then
+            statusLabel.Text = "No item types selected! Select items first"
+            autoBringEnabled = false
+            autoBringToggle.Text = "Auto Bring: OFF"
+            autoBringToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        else
+            statusLabel.Text = "Auto bringing selected item types"
+        end
+    else
+        statusLabel.Text = "Auto bring disabled"
+    end
+end)
+
+espToggle.MouseButton1Click:Connect(function()
+    espEnabled = not espEnabled
+    espToggle.Text = "Item ESP: " .. (espEnabled and "ON" or "OFF")
+    espToggle.BackgroundColor3 = espEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+    updateESP()
+    statusLabel.Text = espEnabled and "ESP enabled" or "ESP disabled"
+end)
+
+selectAllBtn.MouseButton1Click:Connect(function()
+    for itemName, _ in pairs(itemGroups) do
+        selectedItemTypes[itemName] = true
+    end
+    refreshItemList()
+    updateESPColors()
+end)
+
+selectNoneBtn.MouseButton1Click:Connect(function()
+    selectedItemTypes = {}
+    refreshItemList()
+    updateESPColors()
+    statusLabel.Text = "All items deselected"
+end)
+
+refreshBtn.MouseButton1Click:Connect(function()
+    refreshItemList()
+end)
+
+minimizeBtn.MouseButton1Click:Connect(function()
+    contentFrame.Visible = not contentFrame.Visible
+    mainFrame.Size = contentFrame.Visible and UDim2.new(0, 320, 0, 450) or UDim2.new(0, 320, 0, 35)
+    minimizeBtn.Text = contentFrame.Visible and "-" or "+"
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+    for item, billboard in pairs(espObjects) do
+        billboard:Destroy()
+    end
+end)
+
+-- Auto bring loop (brings selected item types one by one with cooldown)
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        
+        if autoBringEnabled then
+            local currentTime = tick()
+            
+            if currentTime - lastBringTime >= bringCooldown then
+                updateItemGroups()
+                
+                -- Get a valid item from selected types
+                local itemToBring = nil
+                for itemName, _ in pairs(selectedItemTypes) do
+                    if itemGroups[itemName] and #itemGroups[itemName] > 0 then
+                        -- Get first valid item of this type
+                        for _, item in pairs(itemGroups[itemName]) do
+                            if item and item.Parent then
+                                itemToBring = item
+                                break
+                            end
+                        end
+                        if itemToBring then break end
+                    end
+                end
+                
+                if itemToBring then
+                    bring(itemToBring)
+                    lastBringTime = currentTime
+                    statusLabel.Text = "Brought " .. itemToBring.Name .. " - Next in " .. bringCooldown .. "s"
+                else
+                    statusLabel.Text = "No selected items available to bring"
+                end
+            else
+                -- Show countdown
+                local timeLeft = math.ceil(bringCooldown - (currentTime - lastBringTime))
+                statusLabel.Text = "Cooldown: " .. timeLeft .. "s remaining..."
+            end
+        end
+    end
+end)
+
+-- Auto-refresh when items are added/removed
+items.ChildAdded:Connect(function(item)
+    task.wait(0.1)
+    refreshItemList()
+    if espEnabled then
+        createESP(item)
+    end
+end)
+
+items.ChildRemoved:Connect(function(item)
+    removeESP(item)
+    task.wait(0.1)
+    refreshItemList()
+end)
+
+-- Update canvas size when layout changes
+listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    itemScrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
+end)
+
+-- Character respawn handling
+player.CharacterAdded:Connect(function(newChar)
+    char = newChar
+    hrp = newChar:WaitForChild("HumanoidRootPart")
+end)
+
+-- Initial item list population
+refreshItemList()
+
+print("99 Nights Forest GUI loaded successfully!")
