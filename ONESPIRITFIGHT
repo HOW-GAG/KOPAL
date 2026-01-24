@@ -1,0 +1,405 @@
+-- SPIRIT Damage & God Mode Script
+-- Open Source - No Key System Required
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = game.CoreGui
+
+local PlayerState = {}
+
+-- Get or create player state
+local function GetState(player)
+	if not PlayerState[player.UserId] then
+		PlayerState[player.UserId] = {
+			LoopDamage = false,
+			Godmode = false
+		}
+	end
+	return PlayerState[player.UserId]
+end
+
+-- Fire damage to player
+local function Fire(player, d)
+	if not player.Character then return end
+	local success, err = pcall(function()
+		ReplicatedStorage:WaitForChild("ALLREMBINDS")
+			:WaitForChild("Pls_Dont_Hack_Plssssssssss")
+			:FireServer(
+				"EMMFOSS__!ZCNSJNXCSDWQSANBX",
+				"Main_Damger_OC_R",
+				{player.Character, {D = d, F = Instance.new("Model")}}
+			)
+	end)
+	if not success then
+		warn("Failed to fire damage:", err)
+	end
+end
+
+-- Create GUI
+local ScreenGui = Instance.new("ScreenGui", PlayerGui)
+ScreenGui.Name = "SpiritDamageGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Main frame (compact size)
+local Main = Instance.new("Frame", ScreenGui)
+Main.Size = UDim2.fromOffset(380, 450)
+Main.Position = UDim2.new(0.5, -190, 0.5, -225)
+Main.BackgroundColor3 = Color3.fromRGB(25,25,25)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+
+local MainCorner = Instance.new("UICorner", Main)
+MainCorner.CornerRadius = UDim.new(0, 10)
+
+-- Header bar
+local Header = Instance.new("Frame", Main)
+Header.Size = UDim2.new(1, 0, 0, 35)
+Header.BackgroundColor3 = Color3.fromRGB(0,140,255)
+Header.BorderSizePixel = 0
+
+local HeaderCorner = Instance.new("UICorner", Header)
+HeaderCorner.CornerRadius = UDim.new(0, 10)
+
+-- Fix bottom corners of header
+local HeaderFix = Instance.new("Frame", Header)
+HeaderFix.Size = UDim2.new(1, 0, 0, 10)
+HeaderFix.Position = UDim2.new(0, 0, 1, -10)
+HeaderFix.BackgroundColor3 = Color3.fromRGB(0,140,255)
+HeaderFix.BorderSizePixel = 0
+
+-- Title
+local Title = Instance.new("TextLabel", Header)
+Title.Size = UDim2.new(1, -80, 1, 0)
+Title.Position = UDim2.fromOffset(10, 0)
+Title.Text = "SPIRIT"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 16
+Title.TextColor3 = Color3.new(1,1,1)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.BackgroundTransparency = 1
+
+-- Minimize button
+local MinimizeBtn = Instance.new("TextButton", Header)
+MinimizeBtn.Size = UDim2.fromOffset(30, 30)
+MinimizeBtn.Position = UDim2.new(1, -65, 0.5, -15)
+MinimizeBtn.Text = "_"
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.TextSize = 20
+MinimizeBtn.TextColor3 = Color3.new(1,1,1)
+MinimizeBtn.BackgroundColor3 = Color3.fromRGB(0,110,200)
+MinimizeBtn.BorderSizePixel = 0
+
+local MinCorner = Instance.new("UICorner", MinimizeBtn)
+MinCorner.CornerRadius = UDim.new(0, 6)
+
+-- Close button
+local CloseBtn = Instance.new("TextButton", Header)
+CloseBtn.Size = UDim2.fromOffset(30, 30)
+CloseBtn.Position = UDim2.new(1, -32, 0.5, -15)
+CloseBtn.Text = "X"
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 14
+CloseBtn.TextColor3 = Color3.new(1,1,1)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200,40,40)
+CloseBtn.BorderSizePixel = 0
+
+local CloseCorner = Instance.new("UICorner", CloseBtn)
+CloseCorner.CornerRadius = UDim.new(0, 6)
+
+-- Content frame
+local Content = Instance.new("Frame", Main)
+Content.Size = UDim2.new(1, -20, 1, -45)
+Content.Position = UDim2.fromOffset(10, 40)
+Content.BackgroundTransparency = 1
+
+-- Status label
+local Status = Instance.new("TextLabel", Content)
+Status.Size = UDim2.new(1, 0, 0, 15)
+Status.Text = "Open Source • No Key Required"
+Status.Font = Enum.Font.Gotham
+Status.TextSize = 10
+Status.TextColor3 = Color3.fromRGB(150,150,150)
+Status.BackgroundTransparency = 1
+Status.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Damage input box
+local DBox = Instance.new("TextBox", Content)
+DBox.Size = UDim2.new(1, 0, 0, 32)
+DBox.Position = UDim2.fromOffset(0, 20)
+DBox.Text = "250000"
+DBox.PlaceholderText = "Damage Amount"
+DBox.Font = Enum.Font.Gotham
+DBox.TextSize = 14
+DBox.BackgroundColor3 = Color3.fromRGB(35,35,35)
+DBox.TextColor3 = Color3.new(1,1,1)
+DBox.BorderSizePixel = 0
+
+local DBoxCorner = Instance.new("UICorner", DBox)
+DBoxCorner.CornerRadius = UDim.new(0, 6)
+
+-- Button container
+local ButtonContainer = Instance.new("Frame", Content)
+ButtonContainer.Size = UDim2.new(1, 0, 0, 32)
+ButtonContainer.Position = UDim2.fromOffset(0, 58)
+ButtonContainer.BackgroundTransparency = 1
+
+-- ALL button (half width)
+local AllBtn = Instance.new("TextButton", ButtonContainer)
+AllBtn.Size = UDim2.new(0.48, 0, 1, 0)
+AllBtn.Position = UDim2.fromOffset(0, 0)
+AllBtn.Text = "ALL"
+AllBtn.Font = Enum.Font.GothamBold
+AllBtn.TextSize = 13
+AllBtn.BackgroundColor3 = Color3.fromRGB(170,40,40)
+AllBtn.TextColor3 = Color3.new(1,1,1)
+AllBtn.BorderSizePixel = 0
+
+local AllBtnCorner = Instance.new("UICorner", AllBtn)
+AllBtnCorner.CornerRadius = UDim.new(0, 6)
+
+-- LOCAL button (half width)
+local LocalBtn = Instance.new("TextButton", ButtonContainer)
+LocalBtn.Size = UDim2.new(0.48, 0, 1, 0)
+LocalBtn.Position = UDim2.new(0.52, 0, 0, 0)
+LocalBtn.Text = "SELF"
+LocalBtn.Font = Enum.Font.GothamBold
+LocalBtn.TextSize = 13
+LocalBtn.BackgroundColor3 = Color3.fromRGB(60,120,60)
+LocalBtn.TextColor3 = Color3.new(1,1,1)
+LocalBtn.BorderSizePixel = 0
+
+local LocalBtnCorner = Instance.new("UICorner", LocalBtn)
+LocalBtnCorner.CornerRadius = UDim.new(0, 6)
+
+-- Button functionality
+AllBtn.MouseButton1Click:Connect(function()
+	local dmg = tonumber(DBox.Text) or 0
+	for _, p in pairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			Fire(p, dmg)
+		end
+	end
+	AllBtn.BackgroundColor3 = Color3.fromRGB(255,60,60)
+	task.wait(0.1)
+	AllBtn.BackgroundColor3 = Color3.fromRGB(170,40,40)
+end)
+
+LocalBtn.MouseButton1Click:Connect(function()
+	Fire(LocalPlayer, tonumber(DBox.Text) or 0)
+	LocalBtn.BackgroundColor3 = Color3.fromRGB(100,200,100)
+	task.wait(0.1)
+	LocalBtn.BackgroundColor3 = Color3.fromRGB(60,120,60)
+end)
+
+-- Player list label
+local ListLabel = Instance.new("TextLabel", Content)
+ListLabel.Size = UDim2.new(1, 0, 0, 20)
+ListLabel.Position = UDim2.fromOffset(0, 96)
+ListLabel.Text = "PLAYERS"
+ListLabel.Font = Enum.Font.GothamBold
+ListLabel.TextSize = 11
+ListLabel.TextColor3 = Color3.fromRGB(200,200,200)
+ListLabel.BackgroundTransparency = 1
+ListLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Player list
+local PlayerList = Instance.new("ScrollingFrame", Content)
+PlayerList.Size = UDim2.new(1, 0, 1, -122)
+PlayerList.Position = UDim2.fromOffset(0, 118)
+PlayerList.CanvasSize = UDim2.new(0,0,0,0)
+PlayerList.ScrollBarImageTransparency = 0.3
+PlayerList.BackgroundColor3 = Color3.fromRGB(20,20,20)
+PlayerList.BorderSizePixel = 0
+PlayerList.ScrollBarThickness = 4
+
+local PlayerListCorner = Instance.new("UICorner", PlayerList)
+PlayerListCorner.CornerRadius = UDim.new(0, 6)
+
+local Layout = Instance.new("UIListLayout", PlayerList)
+Layout.Padding = UDim.new(0, 4)
+Layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local ListPadding = Instance.new("UIPadding", PlayerList)
+ListPadding.PaddingTop = UDim.new(0, 4)
+ListPadding.PaddingBottom = UDim.new(0, 4)
+ListPadding.PaddingLeft = UDim.new(0, 4)
+ListPadding.PaddingRight = UDim.new(0, 4)
+
+-- Create player row
+local function CreateRow(player)
+	local state = GetState(player)
+
+	local Row = Instance.new("Frame", PlayerList)
+	Row.Size = UDim2.new(1, -8, 0, 36)
+	Row.BackgroundColor3 = player == LocalPlayer
+		and Color3.fromRGB(35,55,80)
+		or Color3.fromRGB(35,35,35)
+	Row.BorderSizePixel = 0
+	Row.LayoutOrder = player == LocalPlayer and 1 or 2
+
+	local RowCorner = Instance.new("UICorner", Row)
+	RowCorner.CornerRadius = UDim.new(0, 5)
+
+	local Name = Instance.new("TextLabel", Row)
+	Name.Size = UDim2.new(0.32, 0, 1, 0)
+	Name.Position = UDim2.fromOffset(6, 0)
+	Name.Text = player == LocalPlayer
+		and (player.DisplayName .. " (You)")
+		or player.DisplayName
+	Name.Font = Enum.Font.GothamSemibold
+	Name.TextSize = 11
+	Name.TextXAlignment = Enum.TextXAlignment.Left
+	Name.BackgroundTransparency = 1
+	Name.TextColor3 = Color3.new(1,1,1)
+	Name.TextTruncate = Enum.TextTruncate.AtEnd
+
+	local Damage = Instance.new("TextButton", Row)
+	Damage.Size = UDim2.new(0.2, 0, 0, 26)
+	Damage.Position = UDim2.new(0.34, 0, 0.5, -13)
+	Damage.Text = "DMG"
+	Damage.Font = Enum.Font.GothamBold
+	Damage.TextSize = 10
+	Damage.BackgroundColor3 = Color3.fromRGB(70,70,70)
+	Damage.TextColor3 = Color3.new(1,1,1)
+	Damage.BorderSizePixel = 0
+
+	local DamageCorner = Instance.new("UICorner", Damage)
+	DamageCorner.CornerRadius = UDim.new(0, 4)
+
+	local LoopDamage = Instance.new("TextButton", Row)
+	LoopDamage.Size = UDim2.new(0.2, 0, 0, 26)
+	LoopDamage.Position = UDim2.new(0.56, 0, 0.5, -13)
+	LoopDamage.Text = "LOOP"
+	LoopDamage.Font = Enum.Font.GothamBold
+	LoopDamage.TextSize = 9
+	LoopDamage.BackgroundColor3 = Color3.fromRGB(50,50,50)
+	LoopDamage.TextColor3 = Color3.new(1,1,1)
+	LoopDamage.BorderSizePixel = 0
+
+	local LoopCorner = Instance.new("UICorner", LoopDamage)
+	LoopCorner.CornerRadius = UDim.new(0, 4)
+
+	local God = Instance.new("TextButton", Row)
+	God.Size = UDim2.new(0.2, 0, 0, 26)
+	God.Position = UDim2.new(0.78, 0, 0.5, -13)
+	God.Text = "GOD"
+	God.Font = Enum.Font.GothamBold
+	God.TextSize = 10
+	God.BackgroundColor3 = Color3.fromRGB(50,50,50)
+	God.TextColor3 = Color3.new(1,1,1)
+	God.BorderSizePixel = 0
+
+	local GodCorner = Instance.new("UICorner", God)
+	GodCorner.CornerRadius = UDim.new(0, 4)
+
+	-- Button functionality
+	Damage.MouseButton1Click:Connect(function()
+		Fire(player, tonumber(DBox.Text) or 0)
+		Damage.BackgroundColor3 = Color3.fromRGB(150,150,150)
+		task.wait(0.1)
+		Damage.BackgroundColor3 = Color3.fromRGB(70,70,70)
+	end)
+
+	LoopDamage.MouseButton1Click:Connect(function()
+		state.LoopDamage = not state.LoopDamage
+		if state.LoopDamage then
+			LoopDamage.Text = "ON"
+			LoopDamage.BackgroundColor3 = Color3.fromRGB(200,120,0)
+		else
+			LoopDamage.Text = "LOOP"
+			LoopDamage.BackgroundColor3 = Color3.fromRGB(50,50,50)
+		end
+	end)
+
+	God.MouseButton1Click:Connect(function()
+		state.Godmode = not state.Godmode
+		God.Text = state.Godmode and "ON" or "GOD"
+		God.BackgroundColor3 = state.Godmode
+			and Color3.fromRGB(0,120,255)
+			or Color3.fromRGB(50,50,50)
+	end)
+end
+
+-- Refresh player list
+local function Refresh()
+	for _, v in pairs(PlayerList:GetChildren()) do
+		if v:IsA("Frame") then
+			v:Destroy()
+		end
+	end
+
+	for _, p in pairs(Players:GetPlayers()) do
+		CreateRow(p)
+	end
+
+	task.wait()
+	PlayerList.CanvasSize = UDim2.new(0,0,0,Layout.AbsoluteContentSize.Y + 8)
+end
+
+-- Minimize/Maximize functionality
+local isMinimized = false
+local originalSize = Main.Size
+
+MinimizeBtn.MouseButton1Click:Connect(function()
+	isMinimized = not isMinimized
+	
+	local targetSize = isMinimized 
+		and UDim2.fromOffset(380, 35) 
+		or originalSize
+	
+	MinimizeBtn.Text = isMinimized and "□" or "_"
+	Content.Visible = not isMinimized
+	
+	local tween = TweenService:Create(Main, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+		Size = targetSize
+	})
+	tween:Play()
+end)
+
+-- Close button
+CloseBtn.MouseButton1Click:Connect(function()
+	ScreenGui:Destroy()
+end)
+
+-- Player events
+Players.PlayerAdded:Connect(Refresh)
+Players.PlayerRemoving:Connect(function(p)
+	PlayerState[p.UserId] = nil
+	Refresh()
+end)
+
+Refresh()
+
+-- Main loop for continuous effects
+task.spawn(function()
+	while true do
+		for _, p in pairs(Players:GetPlayers()) do
+			local state = PlayerState[p.UserId]
+			if state then
+				if state.LoopDamage then
+					Fire(p, tonumber(DBox.Text) or 0)
+				end
+				if state.Godmode then
+					Fire(p, -math.huge)
+				end
+			end
+		end
+		task.wait()
+	end
+end)
+
+-- Notification on load
+game.StarterGui:SetCore("SendNotification", {
+	Title = "SPIRIT Loaded",
+	Text = "Open Source - No Key Required!",
+	Duration = 5
+})
+
+print("SPIRIT Damage & God Mode Script loaded successfully!")
+print("Open Source - Free to use and modify")
