@@ -1,4 +1,4 @@
--- 99 Nights in the Forest - Enhanced GUI Script with Grouped Item Selection
+-- 99 Nights in the Forest - Instant Multi-Bring GUI
 local player = game.Players.LocalPlayer
 local char = player.Character or player.CharacterAdded:Wait()
 local hrp = char:WaitForChild("HumanoidRootPart")
@@ -12,8 +12,6 @@ local espEnabled = false
 local espObjects = {}
 local selectedItemTypes = {} -- Stores which item types are selected
 local itemGroups = {} -- Stores actual item instances grouped by name
-local lastBringTime = 0
-local bringCooldown = 2 -- 2 seconds cooldown
 
 -- Create ScreenGui
 local screenGui = Instance.new("ScreenGui")
@@ -223,20 +221,33 @@ statusLabel.Parent = contentFrame
 
 -- Functions
 local function bring(item)
-    if not hrp then return end
-    local pos = hrp.CFrame * CFrame.new(0, 2, -10)
+    if not hrp or not item or not item.Parent then return end
     
-    pcall(function()
+    local success, err = pcall(function()
+        -- Calculate position in front of player
+        local pos = hrp.CFrame * CFrame.new(0, 2, -5)
+        
+        -- Fire start dragging
         rs.RemoteEvents.RequestStartDraggingItem:FireServer(item)
         
+        task.wait(0.05) -- Small delay for server response
+        
+        -- Move the item
         if item:IsA("Model") and item.PrimaryPart then
             item:SetPrimaryPartCFrame(pos)
         elseif item:IsA("BasePart") then
             item.CFrame = pos
         end
         
+        task.wait(0.05) -- Small delay before stopping
+        
+        -- Fire stop dragging
         rs.RemoteEvents.StopDraggingItem:FireServer(item)
     end)
+    
+    if not success then
+        warn("Failed to bring item:", err)
+    end
 end
 
 local function updateItemGroups()
@@ -443,7 +454,7 @@ autoBringToggle.MouseButton1Click:Connect(function()
             autoBringToggle.Text = "Auto Bring: OFF"
             autoBringToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         else
-            statusLabel.Text = "Auto bringing selected item types"
+            statusLabel.Text = "Auto bringing selected item types..."
         end
     else
         statusLabel.Text = "Auto bring disabled"
@@ -490,43 +501,36 @@ closeBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Auto bring loop (brings selected item types one by one with cooldown)
+-- Auto bring loop - brings ALL selected items continuously
 task.spawn(function()
     while true do
-        task.wait(0.5)
+        task.wait(0.1) -- Fast loop
         
         if autoBringEnabled then
-            local currentTime = tick()
+            updateItemGroups()
             
-            if currentTime - lastBringTime >= bringCooldown then
-                updateItemGroups()
-                
-                -- Get a valid item from selected types
-                local itemToBring = nil
-                for itemName, _ in pairs(selectedItemTypes) do
-                    if itemGroups[itemName] and #itemGroups[itemName] > 0 then
-                        -- Get first valid item of this type
-                        for _, item in pairs(itemGroups[itemName]) do
-                            if item and item.Parent then
-                                itemToBring = item
-                                break
-                            end
+            local totalBrought = 0
+            
+            -- Loop through all selected item types
+            for itemName, _ in pairs(selectedItemTypes) do
+                if itemGroups[itemName] then
+                    -- Bring ALL items of this type
+                    for _, item in pairs(itemGroups[itemName]) do
+                        if item and item.Parent then
+                            bring(item)
+                            totalBrought = totalBrought + 1
+                            task.wait(0.05) -- Small delay between items
                         end
-                        if itemToBring then break end
                     end
                 end
-                
-                if itemToBring then
-                    bring(itemToBring)
-                    lastBringTime = currentTime
-                    statusLabel.Text = "Brought " .. itemToBring.Name .. " - Next in " .. bringCooldown .. "s"
-                else
-                    statusLabel.Text = "No selected items available to bring"
-                end
+            end
+            
+            if totalBrought > 0 then
+                statusLabel.Text = "Brought " .. totalBrought .. " items! Checking for more..."
+                task.wait(1) -- Wait 1 second before next cycle
             else
-                -- Show countdown
-                local timeLeft = math.ceil(bringCooldown - (currentTime - lastBringTime))
-                statusLabel.Text = "Cooldown: " .. timeLeft .. "s remaining..."
+                statusLabel.Text = "No selected items found. Waiting..."
+                task.wait(2) -- Wait 2 seconds if nothing found
             end
         end
     end
