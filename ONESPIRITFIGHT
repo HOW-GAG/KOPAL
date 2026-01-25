@@ -1,5 +1,6 @@
 -- SPIRIT Damage & God Mode Script
 -- Open Source - No Key System Required
+-- Fixed: Button states now persist correctly
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -275,10 +276,8 @@ local function CreateRow(player)
 	local LoopDamage = Instance.new("TextButton", Row)
 	LoopDamage.Size = UDim2.new(0.2, 0, 0, 26)
 	LoopDamage.Position = UDim2.new(0.56, 0, 0.5, -13)
-	LoopDamage.Text = "LOOP"
 	LoopDamage.Font = Enum.Font.GothamBold
 	LoopDamage.TextSize = 9
-	LoopDamage.BackgroundColor3 = Color3.fromRGB(50,50,50)
 	LoopDamage.TextColor3 = Color3.new(1,1,1)
 	LoopDamage.BorderSizePixel = 0
 
@@ -288,15 +287,38 @@ local function CreateRow(player)
 	local God = Instance.new("TextButton", Row)
 	God.Size = UDim2.new(0.2, 0, 0, 26)
 	God.Position = UDim2.new(0.78, 0, 0.5, -13)
-	God.Text = "GOD"
 	God.Font = Enum.Font.GothamBold
 	God.TextSize = 10
-	God.BackgroundColor3 = Color3.fromRGB(50,50,50)
 	God.TextColor3 = Color3.new(1,1,1)
 	God.BorderSizePixel = 0
 
 	local GodCorner = Instance.new("UICorner", God)
 	GodCorner.CornerRadius = UDim.new(0, 4)
+
+	-- Function to update button appearance based on state
+	local function UpdateLoopButton()
+		if state.LoopDamage then
+			LoopDamage.Text = "ON"
+			LoopDamage.BackgroundColor3 = Color3.fromRGB(200,120,0)
+		else
+			LoopDamage.Text = "LOOP"
+			LoopDamage.BackgroundColor3 = Color3.fromRGB(50,50,50)
+		end
+	end
+
+	local function UpdateGodButton()
+		if state.Godmode then
+			God.Text = "ON"
+			God.BackgroundColor3 = Color3.fromRGB(0,120,255)
+		else
+			God.Text = "GOD"
+			God.BackgroundColor3 = Color3.fromRGB(50,50,50)
+		end
+	end
+
+	-- Initialize button states from saved state
+	UpdateLoopButton()
+	UpdateGodButton()
 
 	-- Button functionality
 	Damage.MouseButton1Click:Connect(function()
@@ -308,21 +330,12 @@ local function CreateRow(player)
 
 	LoopDamage.MouseButton1Click:Connect(function()
 		state.LoopDamage = not state.LoopDamage
-		if state.LoopDamage then
-			LoopDamage.Text = "ON"
-			LoopDamage.BackgroundColor3 = Color3.fromRGB(200,120,0)
-		else
-			LoopDamage.Text = "LOOP"
-			LoopDamage.BackgroundColor3 = Color3.fromRGB(50,50,50)
-		end
+		UpdateLoopButton()
 	end)
 
 	God.MouseButton1Click:Connect(function()
 		state.Godmode = not state.Godmode
-		God.Text = state.Godmode and "ON" or "GOD"
-		God.BackgroundColor3 = state.Godmode
-			and Color3.fromRGB(0,120,255)
-			or Color3.fromRGB(50,50,50)
+		UpdateGodButton()
 	end)
 end
 
@@ -374,6 +387,21 @@ Players.PlayerRemoving:Connect(function(p)
 	Refresh()
 end)
 
+-- Refresh when player character respawns
+for _, player in pairs(Players:GetPlayers()) do
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5) -- Small delay to ensure character is loaded
+		Refresh()
+	end)
+end
+
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5)
+		Refresh()
+	end)
+end)
+
 Refresh()
 
 -- Main loop for continuous effects
@@ -403,3 +431,4 @@ game.StarterGui:SetCore("SendNotification", {
 
 print("SPIRIT Damage & God Mode Script loaded successfully!")
 print("Open Source - Free to use and modify")
+print("Fixed: Button states now persist correctly on respawn")
