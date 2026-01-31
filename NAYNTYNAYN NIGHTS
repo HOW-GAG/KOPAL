@@ -1,4 +1,4 @@
--- 99 Nights in the Forest - Instant Multi-Bring GUI
+-- 99 Nights in the Forest - Advanced Multi-Feature GUI
 local player = game.Players.LocalPlayer
 local char = player.Character or player.CharacterAdded:Wait()
 local hrp = char:WaitForChild("HumanoidRootPart")
@@ -9,9 +9,21 @@ local runService = game:GetService("RunService")
 -- State variables
 local autoBringEnabled = false
 local espEnabled = false
+local fullbrightEnabled = false
 local espObjects = {}
-local selectedItemTypes = {} -- Stores which item types are selected
+local selectedItemTypes = {} -- Stores which item types are selected for bringing
+local espSelectedItems = {} -- Stores which item types show ESP (default: all)
+local itemQuantities = {} -- Stores custom quantities per item type
 local itemGroups = {} -- Stores actual item instances grouped by name
+local searchFilter = "" -- Search filter text
+
+-- Lighting backup
+local originalAmbient
+local originalOutdoorAmbient
+local originalBrightness
+local originalClockTime
+local originalFogEnd
+local originalFogStart
 
 -- Create ScreenGui
 local screenGui = Instance.new("ScreenGui")
@@ -22,8 +34,8 @@ screenGui.Parent = player:WaitForChild("PlayerGui")
 -- Main Frame
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 320, 0, 450)
-mainFrame.Position = UDim2.new(0.5, -160, 0.5, -225)
+mainFrame.Size = UDim2.new(0, 380, 0, 540)
+mainFrame.Position = UDim2.new(0.5, -190, 0.5, -270)
 mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
@@ -98,12 +110,12 @@ contentFrame.Parent = mainFrame
 -- Auto Bring Toggle
 local autoBringToggle = Instance.new("TextButton")
 autoBringToggle.Name = "AutoBringToggle"
-autoBringToggle.Size = UDim2.new(1, 0, 0, 35)
+autoBringToggle.Size = UDim2.new(0.48, 0, 0, 35)
 autoBringToggle.Position = UDim2.new(0, 0, 0, 0)
 autoBringToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 autoBringToggle.Text = "Auto Bring: OFF"
 autoBringToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-autoBringToggle.TextSize = 14
+autoBringToggle.TextSize = 13
 autoBringToggle.Font = Enum.Font.GothamSemibold
 autoBringToggle.Parent = contentFrame
 
@@ -114,12 +126,12 @@ toggleCorner1.Parent = autoBringToggle
 -- ESP Toggle
 local espToggle = Instance.new("TextButton")
 espToggle.Name = "ESPToggle"
-espToggle.Size = UDim2.new(1, 0, 0, 35)
-espToggle.Position = UDim2.new(0, 0, 0, 40)
+espToggle.Size = UDim2.new(0.48, 0, 0, 35)
+espToggle.Position = UDim2.new(0.52, 0, 0, 0)
 espToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-espToggle.Text = "Item ESP: OFF"
+espToggle.Text = "ESP: OFF"
 espToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-espToggle.TextSize = 14
+espToggle.TextSize = 13
 espToggle.Font = Enum.Font.GothamSemibold
 espToggle.Parent = contentFrame
 
@@ -127,292 +139,827 @@ local toggleCorner2 = Instance.new("UICorner")
 toggleCorner2.CornerRadius = UDim.new(0, 6)
 toggleCorner2.Parent = espToggle
 
--- Item Selection Section
-local selectionLabel = Instance.new("TextLabel")
-selectionLabel.Size = UDim2.new(1, 0, 0, 25)
-selectionLabel.Position = UDim2.new(0, 0, 0, 85)
-selectionLabel.BackgroundTransparency = 1
-selectionLabel.Text = "Select Items to Bring:"
-selectionLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-selectionLabel.TextSize = 13
-selectionLabel.Font = Enum.Font.GothamBold
-selectionLabel.TextXAlignment = Enum.TextXAlignment.Left
-selectionLabel.Parent = contentFrame
+-- Fullbright Toggle
+local fullbrightToggle = Instance.new("TextButton")
+fullbrightToggle.Name = "FullbrightToggle"
+fullbrightToggle.Size = UDim2.new(0.48, 0, 0, 35)
+fullbrightToggle.Position = UDim2.new(0, 0, 0, 42)
+fullbrightToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+fullbrightToggle.Text = "Fullbright: OFF"
+fullbrightToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+fullbrightToggle.TextSize = 13
+fullbrightToggle.Font = Enum.Font.GothamSemibold
+fullbrightToggle.Parent = contentFrame
 
--- Buttons Frame (Select All/None, Refresh)
-local buttonFrame = Instance.new("Frame")
-buttonFrame.Size = UDim2.new(1, 0, 0, 30)
-buttonFrame.Position = UDim2.new(0, 0, 0, 110)
-buttonFrame.BackgroundTransparency = 1
-buttonFrame.Parent = contentFrame
+local toggleCorner3 = Instance.new("UICorner")
+toggleCorner3.CornerRadius = UDim.new(0, 6)
+toggleCorner3.Parent = fullbrightToggle
 
-local selectAllBtn = Instance.new("TextButton")
-selectAllBtn.Size = UDim2.new(0.32, 0, 1, 0)
-selectAllBtn.Position = UDim2.new(0, 0, 0, 0)
-selectAllBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-selectAllBtn.Text = "All"
-selectAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-selectAllBtn.TextSize = 12
-selectAllBtn.Font = Enum.Font.GothamSemibold
-selectAllBtn.Parent = buttonFrame
+-- TP to Campfire Button
+local tpCampfireBtn = Instance.new("TextButton")
+tpCampfireBtn.Name = "TPCampfireBtn"
+tpCampfireBtn.Size = UDim2.new(0.48, 0, 0, 35)
+tpCampfireBtn.Position = UDim2.new(0.52, 0, 0, 42)
+tpCampfireBtn.BackgroundColor3 = Color3.fromRGB(220, 120, 50)
+tpCampfireBtn.Text = "TP to Campfire"
+tpCampfireBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+tpCampfireBtn.TextSize = 13
+tpCampfireBtn.Font = Enum.Font.GothamSemibold
+tpCampfireBtn.Parent = contentFrame
 
-local allCorner = Instance.new("UICorner")
-allCorner.CornerRadius = UDim.new(0, 5)
-allCorner.Parent = selectAllBtn
+local toggleCorner4 = Instance.new("UICorner")
+toggleCorner4.CornerRadius = UDim.new(0, 6)
+toggleCorner4.Parent = tpCampfireBtn
 
-local selectNoneBtn = Instance.new("TextButton")
-selectNoneBtn.Size = UDim2.new(0.32, 0, 1, 0)
-selectNoneBtn.Position = UDim2.new(0.34, 0, 0, 0)
-selectNoneBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-selectNoneBtn.Text = "None"
-selectNoneBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-selectNoneBtn.TextSize = 12
-selectNoneBtn.Font = Enum.Font.GothamSemibold
-selectNoneBtn.Parent = buttonFrame
+-- Tab Buttons
+local tabFrame = Instance.new("Frame")
+tabFrame.Size = UDim2.new(1, 0, 0, 30)
+tabFrame.Position = UDim2.new(0, 0, 0, 87)
+tabFrame.BackgroundTransparency = 1
+tabFrame.Parent = contentFrame
 
-local noneCorner = Instance.new("UICorner")
-noneCorner.CornerRadius = UDim.new(0, 5)
-noneCorner.Parent = selectNoneBtn
+local bringTab = Instance.new("TextButton")
+bringTab.Size = UDim2.new(0.32, 0, 1, 0)
+bringTab.Position = UDim2.new(0, 0, 0, 0)
+bringTab.BackgroundColor3 = Color3.fromRGB(50, 150, 200)
+bringTab.Text = "Bring Items"
+bringTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+bringTab.TextSize = 12
+bringTab.Font = Enum.Font.GothamSemibold
+bringTab.Parent = tabFrame
 
-local refreshBtn = Instance.new("TextButton")
-refreshBtn.Size = UDim2.new(0.32, 0, 1, 0)
-refreshBtn.Position = UDim2.new(0.68, 0, 0, 0)
-refreshBtn.BackgroundColor3 = Color3.fromRGB(50, 120, 200)
-refreshBtn.Text = "Refresh"
-refreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-refreshBtn.TextSize = 12
-refreshBtn.Font = Enum.Font.GothamSemibold
-refreshBtn.Parent = buttonFrame
+local bringTabCorner = Instance.new("UICorner")
+bringTabCorner.CornerRadius = UDim.new(0, 5)
+bringTabCorner.Parent = bringTab
 
-local refreshCorner = Instance.new("UICorner")
-refreshCorner.CornerRadius = UDim.new(0, 5)
-refreshCorner.Parent = refreshBtn
+local espTab = Instance.new("TextButton")
+espTab.Size = UDim2.new(0.32, 0, 1, 0)
+espTab.Position = UDim2.new(0.34, 0, 0, 0)
+espTab.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+espTab.Text = "ESP Filter"
+espTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+espTab.TextSize = 12
+espTab.Font = Enum.Font.GothamSemibold
+espTab.Parent = tabFrame
 
--- Scrolling Frame for Items
-local itemScrollFrame = Instance.new("ScrollingFrame")
-itemScrollFrame.Name = "ItemScrollFrame"
-itemScrollFrame.Size = UDim2.new(1, 0, 0, 200)
-itemScrollFrame.Position = UDim2.new(0, 0, 0, 145)
-itemScrollFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-itemScrollFrame.BorderSizePixel = 0
-itemScrollFrame.ScrollBarThickness = 6
-itemScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
-itemScrollFrame.Parent = contentFrame
+local espTabCorner = Instance.new("UICorner")
+espTabCorner.CornerRadius = UDim.new(0, 5)
+espTabCorner.Parent = espTab
 
-local scrollCorner = Instance.new("UICorner")
-scrollCorner.CornerRadius = UDim.new(0, 6)
-scrollCorner.Parent = itemScrollFrame
+local tpTab = Instance.new("TextButton")
+tpTab.Size = UDim2.new(0.32, 0, 1, 0)
+tpTab.Position = UDim2.new(0.68, 0, 0, 0)
+tpTab.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+tpTab.Text = "TP to Item"
+tpTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+tpTab.TextSize = 12
+tpTab.Font = Enum.Font.GothamSemibold
+tpTab.Parent = tabFrame
 
-local listLayout = Instance.new("UIListLayout")
-listLayout.Padding = UDim.new(0, 3)
-listLayout.Parent = itemScrollFrame
+local tpTabCorner = Instance.new("UICorner")
+tpTabCorner.CornerRadius = UDim.new(0, 5)
+tpTabCorner.Parent = tpTab
+
+-- Bring Items Panel
+local bringPanel = Instance.new("Frame")
+bringPanel.Name = "BringPanel"
+bringPanel.Size = UDim2.new(1, 0, 1, -212)
+bringPanel.Position = UDim2.new(0, 0, 0, 127)
+bringPanel.BackgroundTransparency = 1
+bringPanel.Visible = true
+bringPanel.Parent = contentFrame
+
+local bringLabel = Instance.new("TextLabel")
+bringLabel.Size = UDim2.new(1, 0, 0, 20)
+bringLabel.BackgroundTransparency = 1
+bringLabel.Text = "Select Items & Quantity:"
+bringLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+bringLabel.TextSize = 12
+bringLabel.Font = Enum.Font.GothamBold
+bringLabel.TextXAlignment = Enum.TextXAlignment.Left
+bringLabel.Parent = bringPanel
+
+-- Search Bar for Bring Panel
+local bringSearchBar = Instance.new("TextBox")
+bringSearchBar.Size = UDim2.new(1, 0, 0, 25)
+bringSearchBar.Position = UDim2.new(0, 0, 0, 25)
+bringSearchBar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+bringSearchBar.Text = ""
+bringSearchBar.PlaceholderText = "Search items..."
+bringSearchBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+bringSearchBar.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+bringSearchBar.TextSize = 11
+bringSearchBar.Font = Enum.Font.Gotham
+bringSearchBar.Parent = bringPanel
+
+local searchBarCorner = Instance.new("UICorner")
+searchBarCorner.CornerRadius = UDim.new(0, 5)
+searchBarCorner.Parent = bringSearchBar
+
+local bringButtonFrame = Instance.new("Frame")
+bringButtonFrame.Size = UDim2.new(1, 0, 0, 25)
+bringButtonFrame.Position = UDim2.new(0, 0, 0, 55)
+bringButtonFrame.BackgroundTransparency = 1
+bringButtonFrame.Parent = bringPanel
+
+local selectAllBring = Instance.new("TextButton")
+selectAllBring.Size = UDim2.new(0.32, 0, 1, 0)
+selectAllBring.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+selectAllBring.Text = "All"
+selectAllBring.TextColor3 = Color3.fromRGB(255, 255, 255)
+selectAllBring.TextSize = 11
+selectAllBring.Font = Enum.Font.GothamSemibold
+selectAllBring.Parent = bringButtonFrame
+local allBringCorner = Instance.new("UICorner")
+allBringCorner.CornerRadius = UDim.new(0, 4)
+allBringCorner.Parent = selectAllBring
+
+local selectNoneBring = Instance.new("TextButton")
+selectNoneBring.Size = UDim2.new(0.32, 0, 1, 0)
+selectNoneBring.Position = UDim2.new(0.34, 0, 0, 0)
+selectNoneBring.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+selectNoneBring.Text = "None"
+selectNoneBring.TextColor3 = Color3.fromRGB(255, 255, 255)
+selectNoneBring.TextSize = 11
+selectNoneBring.Font = Enum.Font.GothamSemibold
+selectNoneBring.Parent = bringButtonFrame
+local noneBringCorner = Instance.new("UICorner")
+noneBringCorner.CornerRadius = UDim.new(0, 4)
+noneBringCorner.Parent = selectNoneBring
+
+local refreshBring = Instance.new("TextButton")
+refreshBring.Size = UDim2.new(0.32, 0, 1, 0)
+refreshBring.Position = UDim2.new(0.68, 0, 0, 0)
+refreshBring.BackgroundColor3 = Color3.fromRGB(50, 120, 200)
+refreshBring.Text = "Refresh"
+refreshBring.TextColor3 = Color3.fromRGB(255, 255, 255)
+refreshBring.TextSize = 11
+refreshBring.Font = Enum.Font.GothamSemibold
+refreshBring.Parent = bringButtonFrame
+local refreshBringCorner = Instance.new("UICorner")
+refreshBringCorner.CornerRadius = UDim.new(0, 4)
+refreshBringCorner.Parent = refreshBring
+
+local bringScroll = Instance.new("ScrollingFrame")
+bringScroll.Size = UDim2.new(1, 0, 1, -85)
+bringScroll.Position = UDim2.new(0, 0, 0, 85)
+bringScroll.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+bringScroll.BorderSizePixel = 0
+bringScroll.ScrollBarThickness = 6
+bringScroll.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
+bringScroll.Parent = bringPanel
+local bringScrollCorner = Instance.new("UICorner")
+bringScrollCorner.CornerRadius = UDim.new(0, 6)
+bringScrollCorner.Parent = bringScroll
+local bringLayout = Instance.new("UIListLayout")
+bringLayout.Padding = UDim.new(0, 3)
+bringLayout.Parent = bringScroll
+
+-- ESP Filter Panel
+local espPanel = Instance.new("Frame")
+espPanel.Name = "ESPPanel"
+espPanel.Size = UDim2.new(1, 0, 1, -212)
+espPanel.Position = UDim2.new(0, 0, 0, 127)
+espPanel.BackgroundTransparency = 1
+espPanel.Visible = false
+espPanel.Parent = contentFrame
+
+local espLabel = Instance.new("TextLabel")
+espLabel.Size = UDim2.new(1, 0, 0, 20)
+espLabel.BackgroundTransparency = 1
+espLabel.Text = "ESP Item Filter:"
+espLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+espLabel.TextSize = 12
+espLabel.Font = Enum.Font.GothamBold
+espLabel.TextXAlignment = Enum.TextXAlignment.Left
+espLabel.Parent = espPanel
+
+-- Search Bar for ESP Panel
+local espSearchBar = Instance.new("TextBox")
+espSearchBar.Size = UDim2.new(1, 0, 0, 25)
+espSearchBar.Position = UDim2.new(0, 0, 0, 25)
+espSearchBar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+espSearchBar.Text = ""
+espSearchBar.PlaceholderText = "Search items..."
+espSearchBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+espSearchBar.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+espSearchBar.TextSize = 11
+espSearchBar.Font = Enum.Font.Gotham
+espSearchBar.Parent = espPanel
+
+local espSearchCorner = Instance.new("UICorner")
+espSearchCorner.CornerRadius = UDim.new(0, 5)
+espSearchCorner.Parent = espSearchBar
+
+local espButtonFrame = Instance.new("Frame")
+espButtonFrame.Size = UDim2.new(1, 0, 0, 25)
+espButtonFrame.Position = UDim2.new(0, 0, 0, 55)
+espButtonFrame.BackgroundTransparency = 1
+espButtonFrame.Parent = espPanel
+
+local selectAllESP = Instance.new("TextButton")
+selectAllESP.Size = UDim2.new(0.32, 0, 1, 0)
+selectAllESP.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+selectAllESP.Text = "All"
+selectAllESP.TextColor3 = Color3.fromRGB(255, 255, 255)
+selectAllESP.TextSize = 11
+selectAllESP.Font = Enum.Font.GothamSemibold
+selectAllESP.Parent = espButtonFrame
+local allESPCorner = Instance.new("UICorner")
+allESPCorner.CornerRadius = UDim.new(0, 4)
+allESPCorner.Parent = selectAllESP
+
+local selectNoneESP = Instance.new("TextButton")
+selectNoneESP.Size = UDim2.new(0.32, 0, 1, 0)
+selectNoneESP.Position = UDim2.new(0.34, 0, 0, 0)
+selectNoneESP.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+selectNoneESP.Text = "None"
+selectNoneESP.TextColor3 = Color3.fromRGB(255, 255, 255)
+selectNoneESP.TextSize = 11
+selectNoneESP.Font = Enum.Font.GothamSemibold
+selectNoneESP.Parent = espButtonFrame
+local noneESPCorner = Instance.new("UICorner")
+noneESPCorner.CornerRadius = UDim.new(0, 4)
+noneESPCorner.Parent = selectNoneESP
+
+local refreshESP = Instance.new("TextButton")
+refreshESP.Size = UDim2.new(0.32, 0, 1, 0)
+refreshESP.Position = UDim2.new(0.68, 0, 0, 0)
+refreshESP.BackgroundColor3 = Color3.fromRGB(50, 120, 200)
+refreshESP.Text = "Refresh"
+refreshESP.TextColor3 = Color3.fromRGB(255, 255, 255)
+refreshESP.TextSize = 11
+refreshESP.Font = Enum.Font.GothamSemibold
+refreshESP.Parent = espButtonFrame
+local refreshESPCorner = Instance.new("UICorner")
+refreshESPCorner.CornerRadius = UDim.new(0, 4)
+refreshESPCorner.Parent = refreshESP
+
+local espScroll = Instance.new("ScrollingFrame")
+espScroll.Size = UDim2.new(1, 0, 1, -85)
+espScroll.Position = UDim2.new(0, 0, 0, 85)
+espScroll.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+espScroll.BorderSizePixel = 0
+espScroll.ScrollBarThickness = 6
+espScroll.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
+espScroll.Parent = espPanel
+local espScrollCorner = Instance.new("UICorner")
+espScrollCorner.CornerRadius = UDim.new(0, 6)
+espScrollCorner.Parent = espScroll
+local espLayout = Instance.new("UIListLayout")
+espLayout.Padding = UDim.new(0, 3)
+espLayout.Parent = espScroll
+
+-- TP Panel
+local tpPanel = Instance.new("Frame")
+tpPanel.Name = "TPPanel"
+tpPanel.Size = UDim2.new(1, 0, 1, -212)
+tpPanel.Position = UDim2.new(0, 0, 0, 127)
+tpPanel.BackgroundTransparency = 1
+tpPanel.Visible = false
+tpPanel.Parent = contentFrame
+
+local tpLabel = Instance.new("TextLabel")
+tpLabel.Size = UDim2.new(1, 0, 0, 20)
+tpLabel.BackgroundTransparency = 1
+tpLabel.Text = "Teleport to Items:"
+tpLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+tpLabel.TextSize = 12
+tpLabel.Font = Enum.Font.GothamBold
+tpLabel.TextXAlignment = Enum.TextXAlignment.Left
+tpLabel.Parent = tpPanel
+
+-- Search Bar for TP Panel
+local tpSearchBar = Instance.new("TextBox")
+tpSearchBar.Size = UDim2.new(1, 0, 0, 25)
+tpSearchBar.Position = UDim2.new(0, 0, 0, 25)
+tpSearchBar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+tpSearchBar.Text = ""
+tpSearchBar.PlaceholderText = "Search items..."
+tpSearchBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+tpSearchBar.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+tpSearchBar.TextSize = 11
+tpSearchBar.Font = Enum.Font.Gotham
+tpSearchBar.Parent = tpPanel
+
+local tpSearchCorner = Instance.new("UICorner")
+tpSearchCorner.CornerRadius = UDim.new(0, 5)
+tpSearchCorner.Parent = tpSearchBar
+
+local refreshTP = Instance.new("TextButton")
+refreshTP.Size = UDim2.new(1, 0, 0, 25)
+refreshTP.Position = UDim2.new(0, 0, 0, 55)
+refreshTP.BackgroundColor3 = Color3.fromRGB(50, 120, 200)
+refreshTP.Text = "Refresh List"
+refreshTP.TextColor3 = Color3.fromRGB(255, 255, 255)
+refreshTP.TextSize = 11
+refreshTP.Font = Enum.Font.GothamSemibold
+refreshTP.Parent = tpPanel
+local refreshTPCorner = Instance.new("UICorner")
+refreshTPCorner.CornerRadius = UDim.new(0, 4)
+refreshTPCorner.Parent = refreshTP
+
+local tpScroll = Instance.new("ScrollingFrame")
+tpScroll.Size = UDim2.new(1, 0, 1, -85)
+tpScroll.Position = UDim2.new(0, 0, 0, 85)
+tpScroll.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+tpScroll.BorderSizePixel = 0
+tpScroll.ScrollBarThickness = 6
+tpScroll.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
+tpScroll.Parent = tpPanel
+local tpScrollCorner = Instance.new("UICorner")
+tpScrollCorner.CornerRadius = UDim.new(0, 6)
+tpScrollCorner.Parent = tpScroll
+local tpLayout = Instance.new("UIListLayout")
+tpLayout.Padding = UDim.new(0, 3)
+tpLayout.Parent = tpScroll
 
 -- Status Label
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(1, 0, 0, 50)
-statusLabel.Position = UDim2.new(0, 0, 0, 355)
+statusLabel.Position = UDim2.new(0, 0, 1, -50)
 statusLabel.BackgroundTransparency = 1
 statusLabel.Text = "Ready - Select items to bring"
 statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-statusLabel.TextSize = 11
+statusLabel.TextSize = 10
 statusLabel.Font = Enum.Font.Gotham
 statusLabel.TextWrapped = true
 statusLabel.Parent = contentFrame
 
 -- Functions
+local function teleportToCampfire()
+    if not hrp then return end
+    
+    local success = pcall(function()
+        local campfire = workspace:WaitForChild("Map"):WaitForChild("Campground"):WaitForChild("CraftingBench"):WaitForChild("WoodSign")
+        if campfire then
+            local targetPos = campfire.CFrame
+            hrp.CFrame = targetPos * CFrame.new(0, 5, 5)
+            statusLabel.Text = "Teleported to Campfire!"
+        end
+    end)
+    
+    if not success then
+        statusLabel.Text = "Campfire not found!"
+    end
+end
+
+local function toggleFullbright()
+    local lighting = game:GetService("Lighting")
+    
+    fullbrightEnabled = not fullbrightEnabled
+    
+    if fullbrightEnabled then
+        -- Save original settings
+        originalAmbient = lighting.Ambient
+        originalOutdoorAmbient = lighting.OutdoorAmbient
+        originalBrightness = lighting.Brightness
+        originalClockTime = lighting.ClockTime
+        originalFogEnd = lighting.FogEnd
+        originalFogStart = lighting.FogStart
+        
+        fullbrightToggle.Text = "Fullbright: ON"
+        fullbrightToggle.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        statusLabel.Text = "Fullbright enabled"
+    else
+        fullbrightToggle.Text = "Fullbright: OFF"
+        fullbrightToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        statusLabel.Text = "Fullbright disabled"
+    end
+end
+
 local function bring(item)
     if not hrp or not item or not item.Parent then return end
     
-    local success, err = pcall(function()
-        -- Calculate position in front of player
+    pcall(function()
         local pos = hrp.CFrame * CFrame.new(0, 2, -5)
-        
-        -- Fire start dragging
         rs.RemoteEvents.RequestStartDraggingItem:FireServer(item)
+        task.wait(0.05)
         
-        task.wait(0.05) -- Small delay for server response
-        
-        -- Move the item
         if item:IsA("Model") and item.PrimaryPart then
             item:SetPrimaryPartCFrame(pos)
         elseif item:IsA("BasePart") then
             item.CFrame = pos
         end
         
-        task.wait(0.05) -- Small delay before stopping
-        
-        -- Fire stop dragging
+        task.wait(0.05)
         rs.RemoteEvents.StopDraggingItem:FireServer(item)
     end)
+end
+
+local function teleportToItem(item)
+    if not hrp or not item or not item.Parent then return end
     
-    if not success then
-        warn("Failed to bring item:", err)
-    end
+    pcall(function()
+        local targetPos
+        if item:IsA("Model") and item.PrimaryPart then
+            targetPos = item.PrimaryPart.CFrame
+        elseif item:IsA("BasePart") then
+            targetPos = item.CFrame
+        end
+        
+        if targetPos then
+            hrp.CFrame = targetPos * CFrame.new(0, 3, 0)
+            statusLabel.Text = "Teleported to " .. item.Name
+        end
+    end)
 end
 
 local function updateItemGroups()
     itemGroups = {}
-    
     for _, item in pairs(items:GetChildren()) do
-        local itemName = item.Name
-        
-        if not itemGroups[itemName] then
-            itemGroups[itemName] = {}
+        if not itemGroups[item.Name] then
+            itemGroups[item.Name] = {}
         end
-        
-        table.insert(itemGroups[itemName], item)
-    end
-end
-
-local function updateESPColors()
-    for item, billboard in pairs(espObjects) do
-        local label = billboard:FindFirstChildOfClass("TextLabel")
-        if label then
-            label.TextColor3 = selectedItemTypes[item.Name] and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 255, 255)
-        end
-    end
-end
-
-local function createItemButton(itemName, count)
-    local itemBtn = Instance.new("TextButton")
-    itemBtn.Name = itemName
-    itemBtn.Size = UDim2.new(1, -6, 0, 30)
-    itemBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    itemBtn.Text = "☐ " .. itemName .. " (x" .. count .. ")"
-    itemBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    itemBtn.TextSize = 12
-    itemBtn.Font = Enum.Font.Gotham
-    itemBtn.TextXAlignment = Enum.TextXAlignment.Left
-    itemBtn.TextTruncate = Enum.TextTruncate.AtEnd
-    itemBtn.Parent = itemScrollFrame
-    
-    local padding = Instance.new("UIPadding")
-    padding.PaddingLeft = UDim.new(0, 8)
-    padding.Parent = itemBtn
-    
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 5)
-    btnCorner.Parent = itemBtn
-    
-    itemBtn.MouseButton1Click:Connect(function()
-        if selectedItemTypes[itemName] then
-            selectedItemTypes[itemName] = nil
-            itemBtn.Text = "☐ " .. itemName .. " (x" .. count .. ")"
-            itemBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-        else
-            selectedItemTypes[itemName] = true
-            itemBtn.Text = "☑ " .. itemName .. " (x" .. count .. ")"
-            itemBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 150)
-        end
-        
-        updateESPColors()
-        
-        local selectedCount = 0
-        for _ in pairs(selectedItemTypes) do selectedCount = selectedCount + 1 end
-        statusLabel.Text = selectedCount .. " item type(s) selected"
-    end)
-    
-    return itemBtn
-end
-
-local function refreshItemList()
-    -- Clear existing buttons
-    for _, child in pairs(itemScrollFrame:GetChildren()) do
-        if child:IsA("TextButton") then
-            child:Destroy()
-        end
-    end
-    
-    -- Update item groups
-    updateItemGroups()
-    
-    -- Sort item names alphabetically
-    local sortedNames = {}
-    for itemName, _ in pairs(itemGroups) do
-        table.insert(sortedNames, itemName)
-    end
-    table.sort(sortedNames)
-    
-    -- Create buttons for each unique item type
-    for _, itemName in ipairs(sortedNames) do
-        local itemList = itemGroups[itemName]
-        local btn = createItemButton(itemName, #itemList)
-        
-        -- Restore selection state
-        if selectedItemTypes[itemName] then
-            btn.Text = "☑ " .. itemName .. " (x" .. #itemList .. ")"
-            btn.BackgroundColor3 = Color3.fromRGB(50, 100, 150)
-        end
-    end
-    
-    -- Update canvas size
-    task.wait()
-    itemScrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 5)
-    
-    local count = 0
-    for _ in pairs(selectedItemTypes) do count = count + 1 end
-    
-    local totalItems = 0
-    for _ in pairs(itemGroups) do totalItems = totalItems + 1 end
-    
-    statusLabel.Text = "Found " .. totalItems .. " item type(s) - " .. count .. " selected"
-end
-
-local function createESP(item)
-    if espObjects[item] then return end
-    
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "ItemESP"
-    billboard.Adornee = item:IsA("Model") and item.PrimaryPart or item
-    billboard.Size = UDim2.new(0, 150, 0, 50)
-    billboard.StudsOffset = Vector3.new(0, 3, 0)
-    billboard.AlwaysOnTop = true
-    billboard.Parent = screenGui
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = item.Name
-    label.TextColor3 = selectedItemTypes[item.Name] and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 255, 255)
-    label.TextSize = 14
-    label.Font = Enum.Font.GothamBold
-    label.TextStrokeTransparency = 0
-    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    label.Parent = billboard
-    
-    espObjects[item] = billboard
-end
-
-local function removeESP(item)
-    if espObjects[item] then
-        espObjects[item]:Destroy()
-        espObjects[item] = nil
+        table.insert(itemGroups[item.Name], item)
     end
 end
 
 local function updateESP()
+    for item, billboard in pairs(espObjects) do
+        billboard:Destroy()
+    end
+    espObjects = {}
+    
     if espEnabled then
         for _, item in pairs(items:GetChildren()) do
-            createESP(item)
+            if espSelectedItems[item.Name] then
+                local billboard = Instance.new("BillboardGui")
+                billboard.Adornee = item:IsA("Model") and item.PrimaryPart or item
+                billboard.Size = UDim2.new(0, 150, 0, 50)
+                billboard.StudsOffset = Vector3.new(0, 3, 0)
+                billboard.AlwaysOnTop = true
+                billboard.Parent = screenGui
+                
+                local label = Instance.new("TextLabel")
+                label.Size = UDim2.new(1, 0, 1, 0)
+                label.BackgroundTransparency = 1
+                label.Text = item.Name
+                label.TextColor3 = Color3.fromRGB(100, 255, 100)
+                label.TextSize = 14
+                label.Font = Enum.Font.GothamBold
+                label.TextStrokeTransparency = 0
+                label.Parent = billboard
+                
+                espObjects[item] = billboard
+            end
         end
-    else
-        for item, billboard in pairs(espObjects) do
-            billboard:Destroy()
-        end
-        espObjects = {}
     end
 end
 
--- Dragging functionality
-local dragging = false
-local dragInput, mousePos, framePos
+local function createBringItemButton(itemName, count)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -6, 0, 40)
+    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    frame.Parent = bringScroll
+    local frameCorner = Instance.new("UICorner")
+    frameCorner.CornerRadius = UDim.new(0, 5)
+    frameCorner.Parent = frame
+    
+    local checkbox = Instance.new("TextButton")
+    checkbox.Size = UDim2.new(0, 30, 0, 30)
+    checkbox.Position = UDim2.new(0, 5, 0, 5)
+    checkbox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    checkbox.Text = selectedItemTypes[itemName] and "☑" or "☐"
+    checkbox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    checkbox.TextSize = 16
+    checkbox.Font = Enum.Font.GothamBold
+    checkbox.Parent = frame
+    local cbCorner = Instance.new("UICorner")
+    cbCorner.CornerRadius = UDim.new(0, 4)
+    cbCorner.Parent = checkbox
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(0, 140, 0, 30)
+    nameLabel.Position = UDim2.new(0, 40, 0, 5)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = itemName .. " (x" .. count .. ")"
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextSize = 11
+    nameLabel.Font = Enum.Font.Gotham
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    nameLabel.Parent = frame
+    
+    local quantityBox = Instance.new("TextBox")
+    quantityBox.Size = UDim2.new(0, 50, 0, 30)
+    quantityBox.Position = UDim2.new(1, -55, 0, 5)
+    quantityBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    quantityBox.Text = tostring(itemQuantities[itemName] or count)
+    quantityBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    quantityBox.TextSize = 11
+    quantityBox.Font = Enum.Font.Gotham
+    quantityBox.PlaceholderText = "Qty"
+    quantityBox.Parent = frame
+    local qbCorner = Instance.new("UICorner")
+    qbCorner.CornerRadius = UDim.new(0, 4)
+    qbCorner.Parent = quantityBox
+    
+    checkbox.MouseButton1Click:Connect(function()
+        selectedItemTypes[itemName] = not selectedItemTypes[itemName]
+        checkbox.Text = selectedItemTypes[itemName] and "☑" or "☐"
+        frame.BackgroundColor3 = selectedItemTypes[itemName] and Color3.fromRGB(50, 100, 150) or Color3.fromRGB(45, 45, 55)
+    end)
+    
+    quantityBox.FocusLost:Connect(function()
+        local num = tonumber(quantityBox.Text)
+        if num and num > 0 then
+            itemQuantities[itemName] = math.floor(num)
+        else
+            quantityBox.Text = tostring(itemQuantities[itemName] or count)
+        end
+    end)
+    
+    if selectedItemTypes[itemName] then
+        frame.BackgroundColor3 = Color3.fromRGB(50, 100, 150)
+    end
+end
+
+local function createESPItemButton(itemName, count)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -6, 0, 30)
+    btn.BackgroundColor3 = espSelectedItems[itemName] and Color3.fromRGB(50, 150, 100) or Color3.fromRGB(45, 45, 55)
+    btn.Text = (espSelectedItems[itemName] and "☑ " or "☐ ") .. itemName
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 11
+    btn.Font = Enum.Font.Gotham
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Parent = espScroll
+    
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 8)
+    padding.Parent = btn
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 5)
+    btnCorner.Parent = btn
+    
+    btn.MouseButton1Click:Connect(function()
+        espSelectedItems[itemName] = not espSelectedItems[itemName]
+        btn.Text = (espSelectedItems[itemName] and "☑ " or "☐ ") .. itemName
+        btn.BackgroundColor3 = espSelectedItems[itemName] and Color3.fromRGB(50, 150, 100) or Color3.fromRGB(45, 45, 55)
+        updateESP()
+    end)
+end
+
+local function createTPItemButton(itemName, item, index)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -6, 0, 35)
+    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    frame.Parent = tpScroll
+    local frameCorner = Instance.new("UICorner")
+    frameCorner.CornerRadius = UDim.new(0, 5)
+    frameCorner.Parent = frame
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(0, 240, 1, 0)
+    nameLabel.Position = UDim2.new(0, 8, 0, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = itemName .. " #" .. index
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextSize = 11
+    nameLabel.Font = Enum.Font.Gotham
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = frame
+    
+    local tpBtn = Instance.new("TextButton")
+    tpBtn.Size = UDim2.new(0, 100, 0, 25)
+    tpBtn.Position = UDim2.new(1, -105, 0, 5)
+    tpBtn.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+    tpBtn.Text = "Teleport Here"
+    tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tpBtn.TextSize = 10
+    tpBtn.Font = Enum.Font.GothamSemibold
+    tpBtn.Parent = frame
+    local tpBtnCorner = Instance.new("UICorner")
+    tpBtnCorner.CornerRadius = UDim.new(0, 4)
+    tpBtnCorner.Parent = tpBtn
+    
+    tpBtn.MouseButton1Click:Connect(function()
+        if item and item.Parent then
+            teleportToItem(item)
+        else
+            statusLabel.Text = "Item no longer exists"
+        end
+    end)
+end
+
+local function refreshBringList()
+    for _, child in pairs(bringScroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    
+    updateItemGroups()
+    local sortedNames = {}
+    for name, _ in pairs(itemGroups) do table.insert(sortedNames, name) end
+    table.sort(sortedNames)
+    
+    -- Apply search filter
+    local searchText = bringSearchBar.Text:lower()
+    
+    for _, name in ipairs(sortedNames) do
+        if searchText == "" or name:lower():find(searchText) then
+            createBringItemButton(name, #itemGroups[name])
+        end
+    end
+    
+    task.wait()
+    bringScroll.CanvasSize = UDim2.new(0, 0, 0, bringLayout.AbsoluteContentSize.Y + 5)
+end
+
+local function refreshESPList()
+    for _, child in pairs(espScroll:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+    
+    updateItemGroups()
+    local sortedNames = {}
+    for name, _ in pairs(itemGroups) do table.insert(sortedNames, name) end
+    table.sort(sortedNames)
+    
+    -- Apply search filter
+    local searchText = espSearchBar.Text:lower()
+    
+    for _, name in ipairs(sortedNames) do
+        if searchText == "" or name:lower():find(searchText) then
+            createESPItemButton(name, #itemGroups[name])
+        end
+    end
+    
+    task.wait()
+    espScroll.CanvasSize = UDim2.new(0, 0, 0, espLayout.AbsoluteContentSize.Y + 5)
+end
+
+local function refreshTPList()
+    for _, child in pairs(tpScroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    
+    updateItemGroups()
+    local sortedNames = {}
+    for name, _ in pairs(itemGroups) do table.insert(sortedNames, name) end
+    table.sort(sortedNames)
+    
+    -- Apply search filter
+    local searchText = tpSearchBar.Text:lower()
+    
+    -- Create individual button for each item instance
+    for _, name in ipairs(sortedNames) do
+        if searchText == "" or name:lower():find(searchText) then
+            local itemList = itemGroups[name]
+            for index, item in ipairs(itemList) do
+                if item and item.Parent then
+                    createTPItemButton(name, item, index)
+                end
+            end
+        end
+    end
+    
+    task.wait()
+    tpScroll.CanvasSize = UDim2.new(0, 0, 0, tpLayout.AbsoluteContentSize.Y + 5)
+end
+
+-- Tab switching
+bringTab.MouseButton1Click:Connect(function()
+    bringPanel.Visible = true
+    espPanel.Visible = false
+    tpPanel.Visible = false
+    bringTab.BackgroundColor3 = Color3.fromRGB(50, 150, 200)
+    espTab.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    tpTab.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+end)
+
+espTab.MouseButton1Click:Connect(function()
+    bringPanel.Visible = false
+    espPanel.Visible = true
+    tpPanel.Visible = false
+    bringTab.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    espTab.BackgroundColor3 = Color3.fromRGB(50, 150, 200)
+    tpTab.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+end)
+
+tpTab.MouseButton1Click:Connect(function()
+    bringPanel.Visible = false
+    espPanel.Visible = false
+    tpPanel.Visible = true
+    bringTab.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    espTab.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    tpTab.BackgroundColor3 = Color3.fromRGB(50, 150, 200)
+    refreshTPList()
+end)
+
+-- Button connections
+autoBringToggle.MouseButton1Click:Connect(function()
+    autoBringEnabled = not autoBringEnabled
+    autoBringToggle.Text = "Auto Bring: " .. (autoBringEnabled and "ON" or "OFF")
+    autoBringToggle.BackgroundColor3 = autoBringEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+    
+    if autoBringEnabled then
+        local count = 0
+        for _ in pairs(selectedItemTypes) do count = count + 1 end
+        if count == 0 then
+            statusLabel.Text = "No items selected! Select items first"
+            autoBringEnabled = false
+            autoBringToggle.Text = "Auto Bring: OFF"
+            autoBringToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        else
+            statusLabel.Text = "Auto bringing selected items..."
+        end
+    else
+        statusLabel.Text = "Auto bring disabled"
+    end
+end)
+
+espToggle.MouseButton1Click:Connect(function()
+    espEnabled = not espEnabled
+    espToggle.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
+    espToggle.BackgroundColor3 = espEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+    updateESP()
+    statusLabel.Text = espEnabled and "ESP enabled" or "ESP disabled"
+end)
+
+selectAllBring.MouseButton1Click:Connect(function()
+    for name, _ in pairs(itemGroups) do
+        selectedItemTypes[name] = true
+    end
+    refreshBringList()
+end)
+
+selectNoneBring.MouseButton1Click:Connect(function()
+    selectedItemTypes = {}
+    refreshBringList()
+end)
+
+refreshBring.MouseButton1Click:Connect(function()
+    refreshBringList()
+end)
+
+selectAllESP.MouseButton1Click:Connect(function()
+    for name, _ in pairs(itemGroups) do
+        espSelectedItems[name] = true
+    end
+    refreshESPList()
+    updateESP()
+end)
+
+selectNoneESP.MouseButton1Click:Connect(function()
+    espSelectedItems = {}
+    refreshESPList()
+    updateESP()
+end)
+
+refreshESP.MouseButton1Click:Connect(function()
+    refreshESPList()
+end)
+
+refreshTP.MouseButton1Click:Connect(function()
+    refreshTPList()
+end)
+
+-- Search bar listeners
+bringSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
+    refreshBringList()
+end)
+
+espSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
+    refreshESPList()
+end)
+
+tpSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
+    refreshTPList()
+end)
+
+-- Fullbright toggle
+fullbrightToggle.MouseButton1Click:Connect(function()
+    toggleFullbright()
+end)
+
+-- TP to Campfire
+tpCampfireBtn.MouseButton1Click:Connect(function()
+    teleportToCampfire()
+end)
+
+minimizeBtn.MouseButton1Click:Connect(function()
+    contentFrame.Visible = not contentFrame.Visible
+    mainFrame.Size = contentFrame.Visible and UDim2.new(0, 380, 0, 540) or UDim2.new(0, 380, 0, 35)
+    minimizeBtn.Text = contentFrame.Visible and "-" or "+"
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+    for item, billboard in pairs(espObjects) do
+        billboard:Destroy()
+    end
+end)
+
+-- Dragging
+local dragging, dragInput, mousePos, framePos = false
 
 titleBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = true
         mousePos = input.Position
         framePos = mainFrame.Position
-        
         input.Changed:Connect(function()
             if input.UserInputState == Enum.UserInputState.End then
                 dragging = false
@@ -430,139 +977,111 @@ end)
 runService.Heartbeat:Connect(function()
     if dragging and dragInput then
         local delta = dragInput.Position - mousePos
-        mainFrame.Position = UDim2.new(
-            framePos.X.Scale,
-            framePos.X.Offset + delta.X,
-            framePos.Y.Scale,
-            framePos.Y.Offset + delta.Y
-        )
+        mainFrame.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
     end
 end)
 
--- Button connections
-autoBringToggle.MouseButton1Click:Connect(function()
-    autoBringEnabled = not autoBringEnabled
-    autoBringToggle.Text = "Auto Bring: " .. (autoBringEnabled and "ON" or "OFF")
-    autoBringToggle.BackgroundColor3 = autoBringEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
-    
-    if autoBringEnabled then
-        local count = 0
-        for _ in pairs(selectedItemTypes) do count = count + 1 end
-        if count == 0 then
-            statusLabel.Text = "No item types selected! Select items first"
-            autoBringEnabled = false
-            autoBringToggle.Text = "Auto Bring: OFF"
-            autoBringToggle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        else
-            statusLabel.Text = "Auto bringing selected item types..."
-        end
-    else
-        statusLabel.Text = "Auto bring disabled"
-    end
-end)
-
-espToggle.MouseButton1Click:Connect(function()
-    espEnabled = not espEnabled
-    espToggle.Text = "Item ESP: " .. (espEnabled and "ON" or "OFF")
-    espToggle.BackgroundColor3 = espEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
-    updateESP()
-    statusLabel.Text = espEnabled and "ESP enabled" or "ESP disabled"
-end)
-
-selectAllBtn.MouseButton1Click:Connect(function()
-    for itemName, _ in pairs(itemGroups) do
-        selectedItemTypes[itemName] = true
-    end
-    refreshItemList()
-    updateESPColors()
-end)
-
-selectNoneBtn.MouseButton1Click:Connect(function()
-    selectedItemTypes = {}
-    refreshItemList()
-    updateESPColors()
-    statusLabel.Text = "All items deselected"
-end)
-
-refreshBtn.MouseButton1Click:Connect(function()
-    refreshItemList()
-end)
-
-minimizeBtn.MouseButton1Click:Connect(function()
-    contentFrame.Visible = not contentFrame.Visible
-    mainFrame.Size = contentFrame.Visible and UDim2.new(0, 320, 0, 450) or UDim2.new(0, 320, 0, 35)
-    minimizeBtn.Text = contentFrame.Visible and "-" or "+"
-end)
-
-closeBtn.MouseButton1Click:Connect(function()
-    screenGui:Destroy()
-    for item, billboard in pairs(espObjects) do
-        billboard:Destroy()
-    end
-end)
-
--- Auto bring loop - brings ALL selected items continuously
+-- Auto bring loop
 task.spawn(function()
     while true do
-        task.wait(0.1) -- Fast loop
+        task.wait(0.1)
         
         if autoBringEnabled then
             updateItemGroups()
-            
             local totalBrought = 0
             
-            -- Loop through all selected item types
             for itemName, _ in pairs(selectedItemTypes) do
                 if itemGroups[itemName] then
-                    -- Bring ALL items of this type
+                    local targetQty = itemQuantities[itemName] or #itemGroups[itemName]
+                    local brought = 0
+                    
                     for _, item in pairs(itemGroups[itemName]) do
+                        if brought >= targetQty then break end
                         if item and item.Parent then
                             bring(item)
+                            brought = brought + 1
                             totalBrought = totalBrought + 1
-                            task.wait(0.05) -- Small delay between items
+                            task.wait(0.05)
                         end
                     end
                 end
             end
             
             if totalBrought > 0 then
-                statusLabel.Text = "Brought " .. totalBrought .. " items! Checking for more..."
-                task.wait(1) -- Wait 1 second before next cycle
+                statusLabel.Text = "Brought " .. totalBrought .. " items!"
+                task.wait(1)
             else
-                statusLabel.Text = "No selected items found. Waiting..."
-                task.wait(2) -- Wait 2 seconds if nothing found
+                statusLabel.Text = "No items to bring. Waiting..."
+                task.wait(2)
             end
         end
     end
 end)
 
--- Auto-refresh when items are added/removed
+-- Fullbright enforcement loop
+task.spawn(function()
+    local lighting = game:GetService("Lighting")
+    
+    while true do
+        task.wait(0.1)
+        
+        if fullbrightEnabled then
+            -- Continuously enforce fullbright settings
+            lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+            lighting.Brightness = 2
+            lighting.ClockTime = 14
+            lighting.FogEnd = 100000
+            lighting.FogStart = 100000
+        end
+    end
+end)
+
+-- Auto-refresh
 items.ChildAdded:Connect(function(item)
     task.wait(0.1)
-    refreshItemList()
-    if espEnabled then
-        createESP(item)
+    refreshBringList()
+    refreshESPList()
+    if espEnabled and espSelectedItems[item.Name] then
+        updateESP()
     end
 end)
 
 items.ChildRemoved:Connect(function(item)
-    removeESP(item)
+    if espObjects[item] then
+        espObjects[item]:Destroy()
+        espObjects[item] = nil
+    end
     task.wait(0.1)
-    refreshItemList()
+    refreshBringList()
+    refreshESPList()
 end)
 
--- Update canvas size when layout changes
-listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    itemScrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
+-- Canvas size updates
+bringLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    bringScroll.CanvasSize = UDim2.new(0, 0, 0, bringLayout.AbsoluteContentSize.Y)
 end)
 
--- Character respawn handling
+espLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    espScroll.CanvasSize = UDim2.new(0, 0, 0, espLayout.AbsoluteContentSize.Y)
+end)
+
+tpLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    tpScroll.CanvasSize = UDim2.new(0, 0, 0, tpLayout.AbsoluteContentSize.Y)
+end)
+
 player.CharacterAdded:Connect(function(newChar)
     char = newChar
     hrp = newChar:WaitForChild("HumanoidRootPart")
 end)
 
--- Initial item list population
-refreshItemList()
+-- Initialize - set all items to show ESP by default
+updateItemGroups()
+for name, _ in pairs(itemGroups) do
+    espSelectedItems[name] = true
+end
 
-print("99 Nights Forest GUI loaded successfully!")
+refreshBringList()
+refreshESPList()
+
+print("99 Nights Forest Advanced GUI loaded!")
