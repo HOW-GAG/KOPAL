@@ -1,0 +1,722 @@
+-- ██████╗ ███████╗███████╗██████╗      ██████╗███████╗██████╗ 
+-- ██╔══██╗██╔════╝██╔════╝██╔══██╗    ██╔════╝██╔════╝██╔══██╗
+-- ██║  ██║█████╗  █████╗  ██████╔╝    ██║     █████╗  ██████╔╝
+-- ██║  ██║██╔══╝  ██╔══╝  ██╔═══╝     ██║     ██╔══╝  ██╔═══╝ 
+-- ██████╔╝███████╗███████╗██║         ╚██████╗███████╗██║     
+-- ╚═════╝ ╚══════╝╚══════╝╚═╝          ╚═════╝╚══════╝╚═╝     
+-- Combined Hub | ESP + AutoCatch + Oxygen Teleport | FIXED VERSION
+
+-- ============================================================
+--  SERVICES
+-- ============================================================
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local CoreGui          = game:GetService("CoreGui")
+
+local player  = Players.LocalPlayer
+local camera  = workspace.CurrentCamera
+
+-- ============================================================
+--  SETTINGS & STATE
+-- ============================================================
+getgenv().ESPSettings = getgenv().ESPSettings or {
+    Tracers      = true,
+    MaxDistance  = 500, -- Increased default slightly
+    Rarities     = {
+        Common    = true,
+        Uncommon  = true,
+        Rare      = true,
+        Epic      = true,
+        Legendary = true,
+        Mythic    = true,
+    }
+}
+
+-- Centralized Feature State
+local featureState = {
+    AutoCatch   = false,
+    AutoOxygen  = false,
+    ESPEnabled  = true,
+    ESPTracers  = getgenv().ESPSettings.Tracers -- Synced immediately
+}
+
+-- ============================================================
+--  GUI CONSTRUCTION
+-- ============================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name            = "DeepCerp_Hub_Fixed"
+screenGui.ResetOnSpawn    = false
+screenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder    = 999
+
+-- Safe Parent Logic
+pcall(function()
+    screenGui.Parent = CoreGui
+end)
+if not screenGui.Parent then
+    screenGui.Parent = player:WaitForChild("PlayerGui")
+end
+
+-- ---- Main Frame ----
+local mainFrame = Instance.new("Frame")
+mainFrame.Name            = "MainFrame"
+mainFrame.Size            = UDim2.new(0, 240, 0, 310) -- Slightly taller for spacing
+mainFrame.Position        = UDim2.new(0, 20, 0, 20)
+mainFrame.BackgroundColor3 = Color3.fromRGB(8, 10, 18)
+mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
+mainFrame.Parent          = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 10)
+mainCorner.Parent        = mainFrame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color     = Color3.fromRGB(60, 130, 220)
+stroke.Thickness = 1.2
+stroke.Transparency = 0.3
+stroke.Parent    = mainFrame
+
+-- ---- Animated Background ----
+local bgGrad = Instance.new("Frame")
+bgGrad.Name               = "BgGrad"
+bgGrad.Size               = UDim2.new(1, 0, 1, 0)
+bgGrad.BackgroundColor3   = Color3.fromRGB(10, 14, 28)
+bgGrad.BorderSizePixel    = 0
+bgGrad.ZIndex             = 1
+bgGrad.Parent             = mainFrame
+
+local bgGradInst = Instance.new("UIGradient")
+bgGradInst.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0,   Color3.fromRGB(8,  12, 30)),
+    ColorSequenceKeypoint.new(0.45, Color3.fromRGB(12, 20, 50)),
+    ColorSequenceKeypoint.new(1,   Color3.fromRGB(5,  8,  20)),
+})
+bgGradInst.Rotation = 135
+bgGradInst.Parent   = bgGrad
+
+RunService.RenderStepped:Connect(function(dt)
+    if bgGradInst.Parent then
+        bgGradInst.Rotation = (bgGradInst.Rotation + dt * 6) % 360
+    end
+end)
+
+-- ---- Top Bar ----
+local topBar = Instance.new("Frame")
+topBar.Name              = "TopBar"
+topBar.Size              = UDim2.new(1, 0, 0, 32)
+topBar.BackgroundColor3  = Color3.fromRGB(15, 22, 50)
+topBar.BorderSizePixel   = 0
+topBar.ZIndex            = 5
+topBar.Parent            = mainFrame
+
+local topBarCorner = Instance.new("UICorner")
+topBarCorner.CornerRadius = UDim.new(0, 10)
+topBarCorner.Parent        = topBar
+
+-- Title
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name              = "Title"
+titleLabel.Size              = UDim2.new(1, -60, 1, 0)
+titleLabel.Position          = UDim2.new(0, 10, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text              = "⬡  DEEP CERP"
+titleLabel.TextColor3        = Color3.fromRGB(180, 215, 255)
+titleLabel.TextSize          = 13
+titleLabel.Font              = Enum.Font.GothamBold
+titleLabel.TextXAlignment    = Enum.TextXAlignment.Left
+titleLabel.ZIndex            = 7
+titleLabel.Parent            = topBar
+
+-- Buttons
+local minBtn = Instance.new("TextButton")
+minBtn.Size              = UDim2.new(0, 22, 0, 22)
+minBtn.Position          = UDim2.new(1, -50, 0.5, -11)
+minBtn.BackgroundColor3  = Color3.fromRGB(25, 40, 90)
+minBtn.Text              = "−"
+minBtn.TextColor3        = Color3.fromRGB(180, 215, 255)
+minBtn.Font              = Enum.Font.GothamBold
+minBtn.ZIndex            = 9
+minBtn.Parent            = topBar
+
+local minBtnCorner = Instance.new("UICorner")
+minBtnCorner.CornerRadius = UDim.new(0, 5)
+minBtnCorner.Parent        = minBtn
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size              = UDim2.new(0, 22, 0, 22)
+closeBtn.Position          = UDim2.new(1, -24, 0.5, -11)
+closeBtn.BackgroundColor3  = Color3.fromRGB(180, 40, 40)
+closeBtn.Text              = "✕"
+closeBtn.TextColor3        = Color3.fromRGB(255, 200, 200)
+closeBtn.Font              = Enum.Font.GothamBold
+closeBtn.ZIndex            = 9
+closeBtn.Parent            = topBar
+
+local closeBtnCorner = Instance.new("UICorner")
+closeBtnCorner.CornerRadius = UDim.new(0, 5)
+closeBtnCorner.Parent        = closeBtn
+
+-- Content
+local content = Instance.new("Frame")
+content.Name               = "Content"
+content.Size               = UDim2.new(1, 0, 1, -32)
+content.Position           = UDim2.new(0, 0, 0, 32)
+content.BackgroundTransparency = 1
+content.ZIndex             = 5
+content.Parent             = mainFrame
+
+-- ---- Helper Functions ----
+local function sectionLabel(text, yPos)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(1, -20, 0, 16)
+    lbl.Position           = UDim2.new(0, 10, 0, yPos)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = text
+    lbl.TextColor3         = Color3.fromRGB(80, 130, 200)
+    lbl.TextSize           = 10
+    lbl.Font               = Enum.Font.GothamBold
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.ZIndex             = 6
+    lbl.Parent             = content
+end
+
+local function createToggle(labelText, yPos, stateKey, callback)
+    local container = Instance.new("Frame")
+    container.Size               = UDim2.new(1, -20, 0, 30)
+    container.Position           = UDim2.new(0, 10, 0, yPos)
+    container.BackgroundColor3   = Color3.fromRGB(14, 20, 42)
+    container.ZIndex             = 6
+    container.Parent             = content
+
+    local cCorner = Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 6)
+    cCorner.Parent        = container
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(1, -50, 1, 0)
+    lbl.Position           = UDim2.new(0, 10, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = labelText
+    lbl.TextColor3         = Color3.fromRGB(190, 210, 255)
+    lbl.TextSize           = 12
+    lbl.Font               = Enum.Font.Gotham
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.ZIndex             = 7
+    lbl.Parent             = container
+
+    local pill = Instance.new("Frame")
+    pill.Size               = UDim2.new(0, 36, 0, 18)
+    pill.Position           = UDim2.new(1, -44, 0.5, -9)
+    pill.BackgroundColor3   = Color3.fromRGB(40, 50, 90)
+    pill.ZIndex             = 7
+    pill.Parent             = container
+
+    local pillCorner = Instance.new("UICorner")
+    pillCorner.CornerRadius = UDim.new(1, 0)
+    pillCorner.Parent        = pill
+
+    local dot = Instance.new("Frame")
+    dot.Size               = UDim2.new(0, 12, 0, 12)
+    dot.Position           = UDim2.new(0, 3, 0.5, -6)
+    dot.BackgroundColor3   = Color3.fromRGB(100, 130, 200)
+    dot.ZIndex             = 8
+    dot.Parent             = pill
+
+    local dotCorner = Instance.new("UICorner")
+    dotCorner.CornerRadius = UDim.new(1, 0)
+    dotCorner.Parent        = dot
+
+    local function updateVisual(state)
+        if state then
+            TweenService:Create(dot,  TweenInfo.new(0.18), {Position = UDim2.new(0, 21, 0.5, -6), BackgroundColor3 = Color3.fromRGB(80, 180, 255)}):Play()
+            TweenService:Create(pill, TweenInfo.new(0.18), {BackgroundColor3 = Color3.fromRGB(20, 80, 180)}):Play()
+        else
+            TweenService:Create(dot,  TweenInfo.new(0.18), {Position = UDim2.new(0, 3, 0.5, -6), BackgroundColor3 = Color3.fromRGB(100, 130, 200)}):Play()
+            TweenService:Create(pill, TweenInfo.new(0.18), {BackgroundColor3 = Color3.fromRGB(40, 50, 90)}):Play()
+        end
+    end
+
+    -- Initial state check
+    updateVisual(featureState[stateKey])
+
+    container.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            featureState[stateKey] = not featureState[stateKey]
+            updateVisual(featureState[stateKey])
+            if callback then callback(featureState[stateKey]) end
+        end
+    end)
+end
+
+local function createSlider(labelText, yPos, minVal, maxVal, currentVal, onChanged)
+    local container = Instance.new("Frame")
+    container.Size               = UDim2.new(1, -20, 0, 38)
+    container.Position           = UDim2.new(0, 10, 0, yPos)
+    container.BackgroundColor3   = Color3.fromRGB(14, 20, 42)
+    container.ZIndex             = 6
+    container.Parent             = content
+
+    local cCorner = Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 6)
+    cCorner.Parent        = container
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(0.6, 0, 0, 16)
+    lbl.Position           = UDim2.new(0, 10, 0, 4)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = labelText
+    lbl.TextColor3         = Color3.fromRGB(190, 210, 255)
+    lbl.TextSize           = 11
+    lbl.Font               = Enum.Font.Gotham
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.ZIndex             = 7
+    lbl.Parent             = container
+
+    local valLabel = Instance.new("TextLabel")
+    valLabel.Size               = UDim2.new(0.35, 0, 0, 16)
+    valLabel.Position           = UDim2.new(0.65, 0, 0, 4)
+    valLabel.BackgroundTransparency = 1
+    valLabel.Text               = tostring(currentVal)
+    valLabel.TextColor3         = Color3.fromRGB(80, 180, 255)
+    valLabel.TextSize           = 11
+    valLabel.Font               = Enum.Font.GothamBold
+    valLabel.TextXAlignment     = Enum.TextXAlignment.Right
+    valLabel.ZIndex             = 7
+    valLabel.Parent             = container
+
+    local track = Instance.new("Frame")
+    track.Size               = UDim2.new(1, -20, 0, 5)
+    track.Position           = UDim2.new(0, 10, 0, 26)
+    track.BackgroundColor3   = Color3.fromRGB(25, 35, 75)
+    track.ZIndex             = 7
+    track.Parent             = container
+
+    local trackCorner = Instance.new("UICorner")
+    trackCorner.CornerRadius = UDim.new(1, 0)
+    trackCorner.Parent        = track
+
+    local fill = Instance.new("Frame")
+    fill.Size               = UDim2.new((currentVal - minVal)/(maxVal - minVal), 0, 1, 0)
+    fill.BackgroundColor3   = Color3.fromRGB(60, 140, 255)
+    fill.ZIndex             = 8
+    fill.Parent             = track
+
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(1, 0)
+    fillCorner.Parent        = fill
+
+    local draggingSlider = false
+
+    local function setSlider(inputX)
+        local trackAbsPos  = track.AbsolutePosition.X
+        local trackAbsSize = track.AbsoluteSize.X
+        local t = math.clamp((inputX - trackAbsPos) / trackAbsSize, 0, 1)
+        local value = math.floor(minVal + t * (maxVal - minVal) + 0.5)
+        fill.Size     = UDim2.new(t, 0, 1, 0)
+        valLabel.Text = tostring(value)
+        if onChanged then onChanged(value) end
+    end
+
+    track.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = true
+            setSlider(inp.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if draggingSlider and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+            setSlider(inp.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = false
+        end
+    end)
+end
+
+-- ============================================================
+--  MENU LAYOUT
+-- ============================================================
+sectionLabel("◈  FISHING", 8)
+createToggle("Auto Catch",   28, "AutoCatch", nil)
+createToggle("Auto Oxygen",  64, "AutoOxygen", nil)
+
+sectionLabel("◈  ESP", 104)
+createToggle("ESP Enabled",     124, "ESPEnabled", nil)
+
+createToggle("ESP Tracers",  160, "ESPTracers", function(v)
+    getgenv().ESPSettings.Tracers = v
+end)
+
+createSlider("Max Distance", 200, 10, 1000, getgenv().ESPSettings.MaxDistance, function(v)
+    getgenv().ESPSettings.MaxDistance = v
+end)
+
+-- UI Interactions (Drag, Min, Close)
+local dragging, dragStart, startPos = false, nil, nil
+topBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+end)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        TweenService:Create(mainFrame, TweenInfo.new(0.2), {Size = UDim2.new(0, 240, 0, 32)}):Play()
+        content.Visible = false
+        minBtn.Text = "+"
+    else
+        content.Visible = true
+        TweenService:Create(mainFrame, TweenInfo.new(0.2), {Size = UDim2.new(0, 240, 0, 310)}):Play()
+        minBtn.Text = "−"
+    end
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if not gpe and input.KeyCode == Enum.KeyCode.RightControl then
+        mainFrame.Visible = not mainFrame.Visible
+    end
+end)
+
+-- ============================================================
+-- ============================================================
+--  LOGIC SECTIONS
+-- ============================================================
+-- ============================================================
+
+-- WRAPPING LOGIC IN SPAWN TO PREVENT YIELDING (This fixes features not loading)
+
+-- ============================================================
+--  1. AUTO CATCH
+-- ============================================================
+task.spawn(function()
+    local TARGET_SIZE  = UDim2.new(1, 0, 1, 0)
+    local TARGET_COLOR = Color3.fromRGB(136, 194, 89)
+
+    local function hookCatchUI()
+        local pGui = player:WaitForChild("PlayerGui", 10)
+        if not pGui then return end
+        
+        -- Use recursive wait or check
+        local catchBar = pGui:FindFirstChild("Main") 
+            and pGui.Main:FindFirstChild("CatchingBar")
+            and pGui.Main.CatchingBar:FindFirstChild("Frame")
+            and pGui.Main.CatchingBar.Frame:FindFirstChild("Bar")
+            and pGui.Main.CatchingBar.Frame.Bar:FindFirstChild("Catch")
+
+        if not catchBar then return end
+
+        local green  = catchBar:FindFirstChild("Green")
+        local gradient = catchBar:FindFirstChild("Gradient")
+        
+        if not green or not gradient then return end
+
+        local function update()
+            if not featureState.AutoCatch then return end
+            green.Size = TARGET_SIZE
+            gradient.BackgroundColor3 = TARGET_COLOR
+        end
+
+        local conn1 = green:GetPropertyChangedSignal("Size"):Connect(update)
+        local conn2 = gradient:GetPropertyChangedSignal("BackgroundColor3"):Connect(update)
+        
+        -- Also enforce in loop
+        RunService.RenderStepped:Connect(function()
+             if green.Parent and featureState.AutoCatch then
+                 update()
+             end
+        end)
+    end
+
+    player.PlayerGui.DescendantAdded:Connect(function(obj)
+        if obj.Name == "Green" or obj.Name == "Gradient" then
+            task.wait(0.1)
+            pcall(hookCatchUI)
+        end
+    end)
+    pcall(hookCatchUI)
+
+    -- Auto Cast/Spam
+    local rs = game:GetService("ReplicatedStorage")
+    local harpoonTarget = rs:WaitForChild("common"):WaitForChild("packages"):WaitForChild("Knit"):WaitForChild("Services"):WaitForChild("HarpoonService"):WaitForChild("RF"):WaitForChild("StartCatching")
+    
+    local capturedArgs = nil
+    local spamming     = false
+
+    local old
+    old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args   = {...}
+
+        if self == harpoonTarget and method == "InvokeServer" then
+            capturedArgs = args
+            if not spamming then
+                spamming = true
+                task.spawn(function()
+                    while spamming and capturedArgs do
+                        if featureState.AutoCatch then
+                             pcall(function()
+                                harpoonTarget:InvokeServer(unpack(capturedArgs))
+                             end)
+                        end
+                        task.wait(0.1)
+                    end
+                end)
+            end
+        end
+        return old(self, ...)
+    end))
+end)
+
+-- ============================================================
+--  2. AUTO OXYGEN (Fixed Logic)
+-- ============================================================
+task.spawn(function()
+    local targetCFrame = CFrame.new(
+        -2.20499992, 4878.19482, -1.22399998,
+        0.968123913, 0, 0.250471711,
+        0, 1, 0,
+        -0.250471711, 0, 0.968123913
+    )
+
+    local safeHeight   = 280
+    local speedUp      = 150
+    local speedAcross  = 200
+    local speedDown    = 200
+
+    local function safeTween(root, targetCF, speed)
+        if not root then return end
+        local dist = (root.Position - targetCF.Position).Magnitude
+        local duration = dist / speed
+        local ti = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local tween = TweenService:Create(root, ti, {CFrame = targetCF})
+        tween:Play()
+        tween.Completed:Wait() -- Wait for completion to prevent glitches
+    end
+
+    while true do
+        if featureState.AutoOxygen then
+            local char = player.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local oxygen = player:GetAttribute("oxygen")
+
+            -- Only proceed if we have root and oxygen is low
+            if root and oxygen and oxygen < 15 then
+                local originalCF = root.CFrame
+                local upCF       = originalCF + Vector3.new(0, safeHeight, 0)
+                local aboveTarget= targetCFrame + Vector3.new(0, safeHeight, 0)
+
+                -- Sequence
+                safeTween(root, upCF, speedUp)
+                safeTween(root, aboveTarget, speedAcross)
+                safeTween(root, targetCFrame, speedDown)
+
+                task.wait(4.5) -- Refill time
+
+                safeTween(root, aboveTarget, speedUp)
+                safeTween(root, upCF, speedAcross)
+                safeTween(root, originalCF, speedDown)
+            end
+        end
+        task.wait(0.5) -- Check every 0.5s
+    end
+end)
+
+-- ============================================================
+--  3. FISH ESP (Optimized & Fixed)
+-- ============================================================
+task.spawn(function()
+    -- Wait for folders safely
+    local fishFolder = workspace:WaitForChild("Game"):WaitForChild("Fish"):WaitForChild("client")
+    
+    local fishModules = ReplicatedStorage:WaitForChild("common")
+        :WaitForChild("presets")
+        :WaitForChild("items")
+        :WaitForChild("fish")
+        
+    local mutationModules = ReplicatedStorage:WaitForChild("common")
+        :WaitForChild("presets")
+        :WaitForChild("fish")
+        :WaitForChild("mutations")
+
+    local rarityColors = {
+        Common    = Color3.fromRGB(200, 200, 200),
+        Uncommon  = Color3.fromRGB(85,  255, 85),
+        Rare      = Color3.fromRGB(85,  170, 255),
+        Epic      = Color3.fromRGB(170, 85,  255),
+        Legendary = Color3.fromRGB(255, 170, 0),
+        Mythic    = Color3.fromRGB(255, 60,  60),
+    }
+
+    local espCache = {}
+    local fishLookup = {}
+    
+    -- Populate lookup
+    for _, biome in ipairs(fishModules:GetChildren()) do
+        for _, mod in ipairs(biome:GetChildren()) do
+            fishLookup[mod.Name] = mod
+        end
+    end
+
+    -- Drawing helpers
+    local function createDrawing(type, props)
+        local d = Drawing.new(type)
+        for k,v in pairs(props) do d[k] = v end
+        return d
+    end
+
+    local function cleanupEsp(fish)
+        if espCache[fish] then
+            for _, d in pairs(espCache[fish]) do
+                d:Remove()
+            end
+            espCache[fish] = nil
+        end
+    end
+
+    local function getRarityAndColor(fishName)
+        local rColor = Color3.new(1,1,1)
+        local rName  = "Common"
+        
+        local mod = fishLookup[fishName]
+        if mod then
+            local s, d = pcall(require, mod)
+            if s and d and d.rarity then
+                rName = d.rarity
+                rColor = rarityColors[rName] or Color3.new(1,1,1)
+            end
+        end
+        return rName, rColor
+    end
+
+    RunService.RenderStepped:Connect(function()
+        if not featureState.ESPEnabled then
+            -- Hide all if disabled
+            for _, entry in pairs(espCache) do
+                for _, d in pairs(entry) do d.Visible = false end
+            end
+            return
+        end
+
+        local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+
+        for _, fish in ipairs(fishFolder:GetChildren()) do
+            -- Initialize ESP if missing
+            if not espCache[fish] then
+                espCache[fish] = {
+                    name  = createDrawing("Text", {Center=true, Outline=true, Size=14, Font=2, Color=Color3.new(1,1,1)}),
+                    info  = createDrawing("Text", {Center=true, Outline=true, Size=12, Font=2, Color=Color3.new(0.8,0.8,0.8)}),
+                    line  = createDrawing("Line", {Thickness=1.5, Color=Color3.new(1,1,1)})
+                }
+            end
+
+            local entry = espCache[fish]
+            
+            -- Validation
+            if not fish.Parent then
+                cleanupEsp(fish)
+                continue
+            end
+
+            -- Get Data
+            local head = fish:FindFirstChild("Head") or fish:FindFirstChild("RootPart")
+            local stats = head and (head:FindFirstChild("stats") or (fish:FindFirstChild("RootPart") and fish.RootPart:FindFirstChild("stats")))
+            
+            if not head or not stats then
+                entry.name.Visible = false
+                entry.info.Visible = false
+                entry.line.Visible = false
+                continue
+            end
+
+            -- Calculate Distance
+            local dist = (root.Position - head.Position).Magnitude
+            if dist > getgenv().ESPSettings.MaxDistance then
+                entry.name.Visible = false
+                entry.info.Visible = false
+                entry.line.Visible = false
+                continue
+            end
+
+            -- Get Stats Text
+            local fishNameLabel = stats:FindFirstChild("Fish")
+            local fishName = fishNameLabel and fishNameLabel.Text or "Unknown"
+            local rarityName, rarityColor = getRarityAndColor(fishName)
+
+            -- Rarity Filter
+            if not getgenv().ESPSettings.Rarities[rarityName] then
+                 entry.name.Visible = false
+                 entry.info.Visible = false
+                 entry.line.Visible = false
+                 continue
+            end
+
+            -- Position
+            local pos, vis = camera:WorldToViewportPoint(head.Position)
+            if not vis then
+                entry.name.Visible = false
+                entry.info.Visible = false
+                entry.line.Visible = false
+                continue
+            end
+
+            -- Update Visuals
+            entry.name.Position = Vector2.new(pos.X, pos.Y)
+            entry.name.Text     = fishName
+            entry.name.Color    = rarityColor
+            entry.name.Visible  = true
+
+            -- Mutation/Weight Info
+            local mutLabel = stats:FindFirstChild("Mutation") and stats.Mutation:FindFirstChild("Label")
+            local mutText = mutLabel and mutLabel.Text or ""
+            local displayInfo = string.format("[%d m]", math.floor(dist))
+            
+            if mutText ~= "" and mutText ~= "Shiny" then
+                 displayInfo = displayInfo .. " | " .. mutText
+                 entry.info.Color = Color3.fromRGB(255, 100, 255) -- Purple for mutation
+            else
+                 entry.info.Color = Color3.fromRGB(200, 200, 200)
+            end
+            
+            entry.info.Position = Vector2.new(pos.X, pos.Y + 14)
+            entry.info.Text     = displayInfo
+            entry.info.Visible  = true
+
+            -- Tracer
+            if featureState.ESPTracers then
+                local mousePos = UserInputService:GetMouseLocation()
+                entry.line.From = Vector2.new(mousePos.X, mousePos.Y)
+                entry.line.To   = Vector2.new(pos.X, pos.Y)
+                entry.line.Color = rarityColor
+                entry.line.Visible = true
+            else
+                entry.line.Visible = false
+            end
+        end
+    end)
+    
+    fishFolder.ChildRemoved:Connect(cleanupEsp)
+end)
