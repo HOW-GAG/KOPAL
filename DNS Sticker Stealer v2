@@ -1,0 +1,658 @@
+--// Services
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+--// Configuration
+local CONFIG = {
+	Title = "StickerVault",
+	Subtitle = "ARCHITECT EDITION",
+	Version = "v3.1",
+	JeepneyFolderName = "Jeepnies",
+	SaveFileName = "SavedJeepneyStickers.json",
+	WebhookURL = "https://discord.com/api/webhooks/1483104077322649631/l8RnLeaDBcUwJKLVUpxi00GH0XUvk1s0-soDnOPi_Ay5UYxSUeDzAV96U1heiym41puh",
+	UI = {
+		Width = 500,
+		Height = 560,
+		MinimizedHeight = 48,
+		CornerRadius = 14,
+		AnimSpeed = 0.22,
+	},
+	Colors = {
+		Background    = Color3.fromRGB(10, 10, 14),
+		SurfaceHigh   = Color3.fromRGB(18, 18, 24),
+		SurfaceMid    = Color3.fromRGB(24, 24, 32),
+		SurfaceLow    = Color3.fromRGB(30, 30, 42),
+		Border        = Color3.fromRGB(50, 50, 70),
+		Accent        = Color3.fromRGB(110, 86, 255),
+		AccentGlow    = Color3.fromRGB(80, 60, 200),
+		AccentSoft    = Color3.fromRGB(60, 50, 120),
+		TextPrimary   = Color3.fromRGB(240, 240, 255),
+		TextSecondary = Color3.fromRGB(140, 140, 165),
+		TextMuted     = Color3.fromRGB(80, 80, 100),
+		Save          = Color3.fromRGB(72, 199, 142),
+		SaveDim       = Color3.fromRGB(40, 100, 75),
+		Delete        = Color3.fromRGB(240, 80, 90),
+		DeleteDim     = Color3.fromRGB(100, 40, 50),
+		Copy          = Color3.fromRGB(200, 200, 220),
+		Discord       = Color3.fromRGB(88, 101, 242),
+		DiscordDim    = Color3.fromRGB(44, 50, 120)
+	}
+}
+
+--// State
+local targetFolder = Workspace:WaitForChild(CONFIG.JeepneyFolderName, 10)
+local guiContainer = (gethui and gethui()) or CoreGui:FindFirstChild("RobloxGui") or CoreGui
+local activeConnections = {}
+local uiInstances = {}
+local savedStickersDB = {}
+local isMinimized = false
+
+local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+
+--// Utilities
+local function tween(obj, props, t, style, dir)
+	TweenService:Create(obj, TweenInfo.new(t or CONFIG.UI.AnimSpeed, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out), props):Play()
+end
+
+local function applyCorner(parent, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or CONFIG.UI.CornerRadius)
+	c.Parent = parent
+	return c
+end
+
+local function applyStroke(parent, color, thickness, transparency)
+	local s = Instance.new("UIStroke")
+	s.Color = color or CONFIG.Colors.Border
+	s.Thickness = thickness or 1
+	s.Transparency = transparency or 0.5
+	s.Parent = parent
+	return s
+end
+
+--// File I/O
+local function loadSavedData()
+	if isfile and readfile then
+		local ok, raw = pcall(readfile, CONFIG.SaveFileName)
+		if ok and raw then
+			local ok2, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+			if ok2 and type(decoded) == "table" then
+				savedStickersDB = decoded
+			end
+		end
+	end
+end
+
+local function saveCurrentData()
+	if writefile then
+		local ok, enc = pcall(function() return HttpService:JSONEncode(savedStickersDB) end)
+		if ok then pcall(writefile, CONFIG.SaveFileName, enc) end
+	end
+end
+
+--// Cleanup
+local function cleanupOldGUI()
+	local existing = guiContainer:FindFirstChild("StickerVaultV3")
+	if existing then existing:Destroy() end
+	for _, c in ipairs(activeConnections) do
+		if c.Connected then c:Disconnect() end
+	end
+	table.clear(activeConnections)
+	table.clear(uiInstances)
+end
+
+local function extractAssetId(tex)
+	return tex and string.match(tex, "%d+") or nil
+end
+
+local function getStickerFolder(jeepney)
+	local b = jeepney:FindFirstChild("Body")
+	if not b then return nil end
+	local s = b:FindFirstChild("Structure")
+	if not s then return nil end
+	local c = s:FindFirstChild("Customizables")
+	if not c then return nil end
+	return c:FindFirstChild("Stickers")
+end
+
+--// Webhook Logic
+local function sendWebhook(id, ownerName, btnRef)
+	if not httprequest then return end
+	btnRef.Text = "..."
+	local thumbUrl = ""
+	
+	local tSuccess, tRes = pcall(function()
+		return httprequest({
+			Url = "https://thumbnails.roblox.com/v1/assets?assetIds=" .. id .. "&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false",
+			Method = "GET"
+		})
+	end)
+	if tSuccess and tRes and tRes.Body then
+		local decoded = HttpService:JSONDecode(tRes.Body)
+		if decoded and decoded.data and decoded.data[1] and decoded.data[1].imageUrl then thumbUrl = decoded.data[1].imageUrl end
+	end
+
+	local payload = {
+		username = "StickerVault Architect",
+		embeds = {{
+			title = "Jeepney Sticker Captured",
+			description = "**Asset ID:** `" .. id .. "`\n**Source:** `" .. ownerName .. "`\n**Link:** [View in Catalog](https://www.roblox.com/library/" .. id .. "/decal)",
+			color = tonumber(0x6e56ff),
+			image = { url = thumbUrl ~= "" and thumbUrl or nil },
+			footer = { text = "StickerVault v3.1 Database Transfer" }
+		}}
+	}
+
+	local wSuccess = pcall(function()
+		return httprequest({ Url = CONFIG.WebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(payload) })
+	end)
+
+	if wSuccess then
+		btnRef.Text = "SENT ✓"
+		tween(btnRef, {BackgroundColor3 = CONFIG.Colors.SaveDim}, 0.2)
+		btnRef.Active = false
+		savedStickersDB[id].sent = true
+		saveCurrentData()
+	else
+		btnRef.Text = "FAIL"
+		task.wait(1)
+		btnRef.Text = "DISCORD"
+	end
+end
+
+local function syncAllToDiscord(btnRef)
+	if not httprequest then return end
+	
+	-- Gather unsent stickers
+	local unsent = {}
+	for id, data in pairs(savedStickersDB) do
+		if not data.sent then
+			table.insert(unsent, {id = id, owner = data.owner})
+		end
+	end
+
+	if #unsent == 0 then
+		btnRef.Text = "ALL SYNCED ✓"
+		task.wait(2)
+		btnRef.Text = "SYNC ALL TO DISCORD"
+		return
+	end
+
+	btnRef.Text = "SYNCING ("..#unsent..")..."
+	
+	-- Process in chunks of 10 (Discord limit per message)
+	for i = 1, #unsent, 10 do
+		local chunk = {}
+		local idsForThumb = {}
+		for j = i, math.min(i + 9, #unsent) do
+			table.insert(chunk, unsent[j])
+			table.insert(idsForThumb, unsent[j].id)
+		end
+		
+		-- Batch fetch thumbnails
+		local thumbs = {}
+		local tSuccess, tRes = pcall(function()
+			return httprequest({
+				Url = "https://thumbnails.roblox.com/v1/assets?assetIds=" .. table.concat(idsForThumb, ",") .. "&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false",
+				Method = "GET"
+			})
+		end)
+		if tSuccess and tRes and tRes.Body then
+			local dec = HttpService:JSONDecode(tRes.Body)
+			if dec and dec.data then
+				for _, tData in ipairs(dec.data) do
+					thumbs[tostring(tData.targetId)] = tData.imageUrl
+				end
+			end
+		end
+
+		local embeds = {}
+		for _, item in ipairs(chunk) do
+			table.insert(embeds, {
+				title = "Jeepney Sticker Captured",
+				description = "**Asset ID:** `" .. item.id .. "`\n**Source:** `" .. item.owner .. "`\n**Link:** [View in Catalog](https://www.roblox.com/library/" .. item.id .. "/decal)",
+				color = tonumber(0x6e56ff),
+				image = { url = thumbs[item.id] or nil },
+				footer = { text = "StickerVault Batch Sync" }
+			})
+		end
+
+		local payload = { username = "StickerVault Architect", embeds = embeds }
+		local wSuccess = pcall(function()
+			return httprequest({ Url = CONFIG.WebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(payload) })
+		end)
+
+		if wSuccess then
+			for _, item in ipairs(chunk) do
+				savedStickersDB[item.id].sent = true
+			end
+			saveCurrentData()
+		end
+		
+		if i + 9 < #unsent then
+			task.wait(1.5) -- Prevent Discord ratelimiting
+		end
+	end
+	
+	btnRef.Text = "SYNC COMPLETE ✓"
+	refreshSavedUI() -- Update the individual buttons visually
+	task.wait(2)
+	btnRef.Text = "SYNC ALL TO DISCORD"
+end
+
+--// UI Build
+local function createUI()
+	cleanupOldGUI()
+
+	local Screen = Instance.new("ScreenGui")
+	Screen.Name = "StickerVaultV3"
+	Screen.ResetOnSpawn = false
+	Screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	Screen.Parent = guiContainer
+
+	local Main = Instance.new("Frame")
+	Main.Name = "Main"
+	Main.Size = UDim2.new(0, CONFIG.UI.Width, 0, CONFIG.UI.Height)
+	Main.Position = UDim2.new(0.5, -CONFIG.UI.Width / 2, 0.5, -CONFIG.UI.Height / 2)
+	Main.BackgroundColor3 = CONFIG.Colors.Background
+	Main.BorderSizePixel = 0
+	Main.Active = true
+	Main.Draggable = true
+	Main.ClipsDescendants = true
+	Main.Parent = Screen
+	applyCorner(Main, CONFIG.UI.CornerRadius)
+	applyStroke(Main, CONFIG.Colors.Border, 1, 0.3)
+
+	local TopBar = Instance.new("Frame")
+	TopBar.Name = "TopBar"
+	TopBar.Size = UDim2.new(1, 0, 0, 48)
+	TopBar.BackgroundColor3 = CONFIG.Colors.SurfaceHigh
+	TopBar.BorderSizePixel = 0
+	TopBar.Parent = Main
+	applyCorner(TopBar, CONFIG.UI.CornerRadius)
+
+	local TopBarFix = Instance.new("Frame")
+	TopBarFix.Size = UDim2.new(1, 0, 0, 14)
+	TopBarFix.Position = UDim2.new(0, 0, 1, -14)
+	TopBarFix.BackgroundColor3 = CONFIG.Colors.SurfaceHigh
+	TopBarFix.BorderSizePixel = 0
+	TopBarFix.Parent = TopBar
+
+	local AccentDot = Instance.new("Frame")
+	AccentDot.Size = UDim2.new(0, 8, 0, 8)
+	AccentDot.Position = UDim2.new(0, 16, 0.5, -4)
+	AccentDot.BackgroundColor3 = CONFIG.Colors.Accent
+	AccentDot.BorderSizePixel = 0
+	AccentDot.Parent = TopBar
+	applyCorner(AccentDot, 4)
+
+	local TitleLabel = Instance.new("TextLabel")
+	TitleLabel.Size = UDim2.new(0, 180, 1, 0)
+	TitleLabel.Position = UDim2.new(0, 32, 0, 0)
+	TitleLabel.BackgroundTransparency = 1
+	TitleLabel.Text = CONFIG.Title
+	TitleLabel.TextColor3 = CONFIG.Colors.TextPrimary
+	TitleLabel.TextSize = 17
+	TitleLabel.Font = Enum.Font.GothamBold
+	TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	TitleLabel.Parent = TopBar
+
+	local function makeDot(xOffset, color)
+		local d = Instance.new("TextButton")
+		d.Size = UDim2.new(0, 12, 0, 12)
+		d.Position = UDim2.new(1, xOffset, 0.5, -6)
+		d.BackgroundColor3 = color
+		d.Text = ""
+		d.AutoButtonColor = false
+		d.BorderSizePixel = 0
+		d.Parent = TopBar
+		applyCorner(d, 6)
+		return d
+	end
+
+	local CloseBtn  = makeDot(-24,  Color3.fromRGB(240, 80,  80))
+	local MinBtn    = makeDot(-44,  Color3.fromRGB(255, 190, 50))
+
+	local Body = Instance.new("Frame")
+	Body.Name = "Body"
+	Body.Size = UDim2.new(1, 0, 1, -48)
+	Body.Position = UDim2.new(0, 0, 0, 48)
+	Body.BackgroundTransparency = 1
+	Body.ClipsDescendants = true
+	Body.Parent = Main
+
+	local PreviewOuter = Instance.new("Frame")
+	PreviewOuter.Size = UDim2.new(1, -24, 0, 180)
+	PreviewOuter.Position = UDim2.new(0, 12, 0, 12)
+	PreviewOuter.BackgroundColor3 = CONFIG.Colors.SurfaceMid
+	PreviewOuter.BorderSizePixel = 0
+	PreviewOuter.Parent = Body
+	applyCorner(PreviewOuter, 10)
+	applyStroke(PreviewOuter, CONFIG.Colors.Border, 1, 0.4)
+
+	local PreviewImage = Instance.new("ImageLabel")
+	PreviewImage.Size = UDim2.new(1, 0, 1, 0)
+	PreviewImage.BackgroundTransparency = 1
+	PreviewImage.Image = ""
+	PreviewImage.ScaleType = Enum.ScaleType.Fit
+	PreviewImage.Parent = PreviewOuter
+
+	local PreviewPrompt = Instance.new("TextLabel")
+	PreviewPrompt.Size = UDim2.new(1, 0, 1, 0)
+	PreviewPrompt.BackgroundTransparency = 1
+	PreviewPrompt.Text = "Click a sticker to preview"
+	PreviewPrompt.TextColor3 = CONFIG.Colors.TextMuted
+	PreviewPrompt.TextSize = 12
+	PreviewPrompt.Font = Enum.Font.Gotham
+	PreviewPrompt.Parent = PreviewOuter
+
+	local TabBar = Instance.new("Frame")
+	TabBar.Size = UDim2.new(1, -24, 0, 36)
+	TabBar.Position = UDim2.new(0, 12, 0, 204)
+	TabBar.BackgroundColor3 = CONFIG.Colors.SurfaceHigh
+	TabBar.BorderSizePixel = 0
+	TabBar.Parent = Body
+	applyCorner(TabBar, 8)
+
+	local TabLayout = Instance.new("UIListLayout")
+	TabLayout.FillDirection = Enum.FillDirection.Horizontal
+	TabLayout.Parent = TabBar
+
+	local ActiveTabBtn = Instance.new("TextButton")
+	ActiveTabBtn.Size = UDim2.new(0.5, 0, 1, 0)
+	ActiveTabBtn.BackgroundColor3 = CONFIG.Colors.Accent
+	ActiveTabBtn.Text = "  Active Vehicles"
+	ActiveTabBtn.TextColor3 = CONFIG.Colors.TextPrimary
+	ActiveTabBtn.Font = Enum.Font.GothamBold
+	ActiveTabBtn.TextSize = 13
+	ActiveTabBtn.Parent = TabBar
+	applyCorner(ActiveTabBtn, 8)
+
+	local SavedTabBtn = Instance.new("TextButton")
+	SavedTabBtn.Size = UDim2.new(0.5, 0, 1, 0)
+	SavedTabBtn.BackgroundTransparency = 1
+	SavedTabBtn.Text = "  Saved Stickers"
+	SavedTabBtn.TextColor3 = CONFIG.Colors.TextSecondary
+	SavedTabBtn.Font = Enum.Font.GothamBold
+	SavedTabBtn.TextSize = 13
+	SavedTabBtn.Parent = TabBar
+	applyCorner(SavedTabBtn, 8)
+
+	-- ScrollFrames
+	local ActiveScroll = Instance.new("ScrollingFrame")
+	ActiveScroll.Size = UDim2.new(1, -24, 1, -256)
+	ActiveScroll.Position = UDim2.new(0, 12, 0, 252)
+	ActiveScroll.BackgroundTransparency = 1
+	ActiveScroll.ScrollBarThickness = 3
+	ActiveScroll.ScrollBarImageColor3 = CONFIG.Colors.Accent
+	ActiveScroll.BorderSizePixel = 0
+	ActiveScroll.Parent = Body
+	local ActiveLayout = Instance.new("UIListLayout")
+	ActiveLayout.Padding = UDim.new(0, 6)
+	ActiveLayout.Parent = ActiveScroll
+
+	local SavedScroll = Instance.new("ScrollingFrame")
+	SavedScroll.Size = UDim2.new(1, -24, 1, -300) -- Shorter to make room for Sync button
+	SavedScroll.Position = UDim2.new(0, 12, 0, 252)
+	SavedScroll.BackgroundTransparency = 1
+	SavedScroll.ScrollBarThickness = 3
+	SavedScroll.ScrollBarImageColor3 = CONFIG.Colors.Accent
+	SavedScroll.BorderSizePixel = 0
+	SavedScroll.Visible = false
+	SavedScroll.Parent = Body
+	local SavedLayout = Instance.new("UIListLayout")
+	SavedLayout.Padding = UDim.new(0, 6)
+	SavedLayout.Parent = SavedScroll
+
+	-- SYNC ALL BUTTON (Floating Bottom)
+	local SyncAllBtn = Instance.new("TextButton")
+	SyncAllBtn.Size = UDim2.new(1, -24, 0, 36)
+	SyncAllBtn.Position = UDim2.new(0, 12, 1, -12)
+	SyncAllBtn.AnchorPoint = Vector2.new(0, 1)
+	SyncAllBtn.BackgroundColor3 = CONFIG.Colors.DiscordDim
+	SyncAllBtn.Text = "SYNC ALL TO DISCORD"
+	SyncAllBtn.TextColor3 = CONFIG.Colors.TextPrimary
+	SyncAllBtn.Font = Enum.Font.GothamBold
+	SyncAllBtn.TextSize = 12
+	SyncAllBtn.Visible = false
+	SyncAllBtn.Parent = Body
+	applyCorner(SyncAllBtn, 8)
+	applyStroke(SyncAllBtn, CONFIG.Colors.Discord, 1, 0.2)
+
+	SyncAllBtn.MouseButton1Click:Connect(function() syncAllToDiscord(SyncAllBtn) end)
+
+	local function switchTab(toActive)
+		if toActive then
+			tween(ActiveTabBtn, {BackgroundColor3 = CONFIG.Colors.Accent, BackgroundTransparency = 0, TextColor3 = CONFIG.Colors.TextPrimary}, 0.15)
+			tween(SavedTabBtn,  {BackgroundColor3 = Color3.fromRGB(0,0,0), BackgroundTransparency = 1, TextColor3 = CONFIG.Colors.TextSecondary}, 0.15)
+			ActiveScroll.Visible = true
+			SavedScroll.Visible = false
+			SyncAllBtn.Visible = false
+		else
+			tween(SavedTabBtn,  {BackgroundColor3 = CONFIG.Colors.Accent, BackgroundTransparency = 0, TextColor3 = CONFIG.Colors.TextPrimary}, 0.15)
+			tween(ActiveTabBtn, {BackgroundColor3 = Color3.fromRGB(0,0,0), BackgroundTransparency = 1, TextColor3 = CONFIG.Colors.TextSecondary}, 0.15)
+			ActiveScroll.Visible = false
+			SavedScroll.Visible = true
+			SyncAllBtn.Visible = true
+		end
+	end
+
+	ActiveTabBtn.MouseButton1Click:Connect(function() switchTab(true) end)
+	SavedTabBtn.MouseButton1Click:Connect(function() switchTab(false) end)
+
+	MinBtn.MouseButton1Click:Connect(function()
+		isMinimized = not isMinimized
+		tween(Main, {Size = UDim2.new(0, CONFIG.UI.Width, 0, isMinimized and CONFIG.UI.MinimizedHeight or CONFIG.UI.Height)}, CONFIG.UI.AnimSpeed)
+		tween(Body, {Position = UDim2.new(0, 0, isMinimized and 2 or 0, isMinimized and 0 or 48)}, CONFIG.UI.AnimSpeed)
+	end)
+
+	CloseBtn.MouseButton1Click:Connect(cleanupOldGUI)
+
+	uiInstances.PreviewImage    = PreviewImage
+	uiInstances.PreviewPrompt   = PreviewPrompt
+	uiInstances.ActiveScroll    = ActiveScroll
+	uiInstances.SavedScroll     = SavedScroll
+	uiInstances.ActiveLayout    = ActiveLayout
+	uiInstances.SavedLayout     = SavedLayout
+end
+
+-----------------------------
+-- Sticker Entry Component
+-----------------------------
+local function createStickerEntry(parentScroll, id, ownerName, isSavedMode)
+	local emptyLbl = parentScroll:FindFirstChild("_EmptyLabel")
+	if emptyLbl then emptyLbl:Destroy() end
+
+	local Card = Instance.new("Frame")
+	Card.Size = UDim2.new(1, -8, 0, 52)
+	Card.BackgroundColor3 = CONFIG.Colors.SurfaceLow
+	Card.BorderSizePixel = 0
+	Card.Parent = parentScroll
+	applyCorner(Card, 8)
+	applyStroke(Card, CONFIG.Colors.Border, 1, 0.6)
+
+	local IconBg = Instance.new("Frame")
+	IconBg.Size = UDim2.new(0, 38, 0, 38)
+	IconBg.Position = UDim2.new(0, 7, 0.5, -19)
+	IconBg.BackgroundColor3 = CONFIG.Colors.SurfaceMid
+	IconBg.BorderSizePixel = 0
+	IconBg.Parent = Card
+	applyCorner(IconBg, 6)
+
+	local Icon = Instance.new("ImageLabel")
+	Icon.Size = UDim2.new(1, -6, 1, -6)
+	Icon.Position = UDim2.new(0, 3, 0, 3)
+	Icon.BackgroundTransparency = 1
+	Icon.Image = "rbxassetid://" .. id
+	Icon.ScaleType = Enum.ScaleType.Fit
+	Icon.Parent = IconBg
+
+	local IDLabel = Instance.new("TextLabel")
+	IDLabel.Size = UDim2.new(0, 140, 0, 20)
+	IDLabel.Position = UDim2.new(0, 55, 0, 7)
+	IDLabel.BackgroundTransparency = 1
+	IDLabel.Text = id
+	IDLabel.TextColor3 = CONFIG.Colors.TextPrimary
+	IDLabel.TextSize = 13
+	IDLabel.Font = Enum.Font.GothamBold
+	IDLabel.TextXAlignment = Enum.TextXAlignment.Left
+	IDLabel.Parent = Card
+
+	local OwnerLabel = Instance.new("TextLabel")
+	OwnerLabel.Size = UDim2.new(0, 140, 0, 16)
+	OwnerLabel.Position = UDim2.new(0, 55, 0, 28)
+	OwnerLabel.BackgroundTransparency = 1
+	OwnerLabel.Text = "by " .. ownerName
+	OwnerLabel.TextColor3 = CONFIG.Colors.TextSecondary
+	OwnerLabel.TextSize = 11
+	OwnerLabel.Font = Enum.Font.Gotham
+	OwnerLabel.TextXAlignment = Enum.TextXAlignment.Left
+	OwnerLabel.Parent = Card
+
+	-- NEW: Dynamic Button Container fixed spacing
+	local ActionContainer = Instance.new("Frame")
+	ActionContainer.Size = UDim2.new(0, 250, 1, 0)
+	ActionContainer.Position = UDim2.new(1, -10, 0, 0)
+	ActionContainer.AnchorPoint = Vector2.new(1, 0)
+	ActionContainer.BackgroundTransparency = 1
+	ActionContainer.Parent = Card
+
+	local ActLayout = Instance.new("UIListLayout")
+	ActLayout.FillDirection = Enum.FillDirection.Horizontal
+	ActLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	ActLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	ActLayout.Padding = UDim.new(0, 8)
+	ActLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	ActLayout.Parent = ActionContainer
+
+	local function makePill(text, bgColor, textColor, width, order)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0, width or 54, 0, 26)
+		btn.BackgroundColor3 = bgColor
+		btn.Text = text
+		btn.TextColor3 = textColor
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 11
+		btn.LayoutOrder = order
+		btn.AutoButtonColor = false
+		btn.Parent = ActionContainer
+		applyCorner(btn, 6)
+		return btn
+	end
+
+	local CopyBtn = makePill("COPY", CONFIG.Colors.SurfaceMid, CONFIG.Colors.Copy, 50, 2)
+	applyStroke(CopyBtn, CONFIG.Colors.Border, 1, 0.3)
+
+	local ActionBtn
+	local WebhookBtn
+
+	if isSavedMode then
+		WebhookBtn = makePill("DISCORD", CONFIG.Colors.DiscordDim, CONFIG.Colors.TextPrimary, 65, 1)
+		applyStroke(WebhookBtn, CONFIG.Colors.Discord, 1, 0.5)
+		
+		ActionBtn = makePill("REMOVE", CONFIG.Colors.DeleteDim, CONFIG.Colors.Delete, 60, 3)
+		applyStroke(ActionBtn, CONFIG.Colors.Delete, 1, 0.5)
+		
+		-- Failsafe UI Update
+		if savedStickersDB[id].sent then
+			WebhookBtn.Text = "SENT ✓"
+			WebhookBtn.BackgroundColor3 = CONFIG.Colors.SaveDim
+			WebhookBtn.Active = false
+		end
+	else
+		if savedStickersDB[id] then
+			ActionBtn = makePill("SAVED ✓", CONFIG.Colors.SaveDim, CONFIG.Colors.Save, 60, 3)
+			ActionBtn.Active = false
+		else
+			ActionBtn = makePill("SAVE", CONFIG.Colors.SaveDim, CONFIG.Colors.Save, 60, 3)
+			applyStroke(ActionBtn, CONFIG.Colors.Save, 1, 0.5)
+		end
+	end
+
+	-- Hover & Click logic
+	local HoverBtn = Instance.new("TextButton")
+	HoverBtn.Size = UDim2.new(1, -ActionContainer.Size.X.Offset, 1, 0)
+	HoverBtn.BackgroundTransparency = 1
+	HoverBtn.Text = ""
+	HoverBtn.ZIndex = 2
+	HoverBtn.Parent = Card
+
+	HoverBtn.MouseButton1Click:Connect(function()
+		uiInstances.PreviewImage.Image = "rbxassetid://" .. id
+		uiInstances.PreviewPrompt.Visible = false
+	end)
+
+	CopyBtn.MouseButton1Click:Connect(function()
+		if setclipboard then pcall(setclipboard, id); CopyBtn.Text = "✓"; task.wait(1.2); CopyBtn.Text = "COPY" end
+	end)
+
+	if WebhookBtn then
+		WebhookBtn.MouseButton1Click:Connect(function()
+			if savedStickersDB[id].sent then return end
+			sendWebhook(id, ownerName, WebhookBtn)
+		end)
+	end
+
+	ActionBtn.MouseButton1Click:Connect(function()
+		if isSavedMode then
+			savedStickersDB[id] = nil
+			saveCurrentData()
+			Card:Destroy()
+			refreshActiveUI()
+		else
+			if savedStickersDB[id] then return end
+			savedStickersDB[id] = { owner = ownerName, sent = false }
+			saveCurrentData()
+			ActionBtn.Text = "SAVED ✓"
+			tween(ActionBtn, {BackgroundColor3 = CONFIG.Colors.SaveDim}, 0.15)
+			ActionBtn.Active = false
+			refreshSavedUI()
+		end
+	end)
+end
+
+-----------------------------
+-- Refresh Loops
+-----------------------------
+function refreshActiveUI()
+	if not uiInstances.ActiveScroll then return end
+	for _, c in ipairs(uiInstances.ActiveScroll:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+	if targetFolder then
+		for _, jeepney in ipairs(targetFolder:GetChildren()) do
+			local sf = getStickerFolder(jeepney)
+			if sf then
+				for _, obj in ipairs(sf:GetChildren()) do
+					local decal = obj:FindFirstChildWhichIsA("Decal") or obj:FindFirstChildWhichIsA("Texture")
+					if decal and decal.Texture ~= "" then
+						local id = extractAssetId(decal.Texture)
+						if id then createStickerEntry(uiInstances.ActiveScroll, id, jeepney.Name, false) end
+					end
+				end
+			end
+		end
+	end
+	task.defer(function() uiInstances.ActiveScroll.CanvasSize = UDim2.new(0, 0, 0, uiInstances.ActiveLayout.AbsoluteContentSize.Y + 10) end)
+end
+
+function refreshSavedUI()
+	if not uiInstances.SavedScroll then return end
+	for _, c in ipairs(uiInstances.SavedScroll:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+	for id, data in pairs(savedStickersDB) do createStickerEntry(uiInstances.SavedScroll, id, data.owner, true) end
+	task.defer(function() uiInstances.SavedScroll.CanvasSize = UDim2.new(0, 0, 0, uiInstances.SavedLayout.AbsoluteContentSize.Y + 10) end)
+end
+
+-----------------------------
+-- Initialization
+-----------------------------
+loadSavedData()
+createUI()
+refreshSavedUI()
+
+if targetFolder then
+	refreshActiveUI()
+	table.insert(activeConnections, targetFolder.ChildAdded:Connect(function() task.wait(1.5); refreshActiveUI() end))
+	table.insert(activeConnections, targetFolder.ChildRemoved:Connect(function() refreshActiveUI() end))
+end
