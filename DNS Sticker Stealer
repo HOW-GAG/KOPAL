@@ -1,0 +1,771 @@
+--// Services
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+--// Configuration
+local CONFIG = {
+	Title = "StickerVault",
+	Subtitle = "ARCHITECT EDITION",
+	Version = "v3.0",
+	JeepneyFolderName = "Jeepnies",
+	SaveFileName = "SavedJeepneyStickers.json",
+	UI = {
+		Width = 500,
+		Height = 560,
+		MinimizedHeight = 48,
+		CornerRadius = 14,
+		AnimSpeed = 0.22,
+	},
+	Colors = {
+		-- Base
+		Background    = Color3.fromRGB(10, 10, 14),
+		SurfaceHigh   = Color3.fromRGB(18, 18, 24),
+		SurfaceMid    = Color3.fromRGB(24, 24, 32),
+		SurfaceLow    = Color3.fromRGB(30, 30, 42),
+		Border        = Color3.fromRGB(50, 50, 70),
+		-- Accent
+		Accent        = Color3.fromRGB(110, 86, 255),
+		AccentGlow    = Color3.fromRGB(80, 60, 200),
+		AccentSoft    = Color3.fromRGB(60, 50, 120),
+		-- Text
+		TextPrimary   = Color3.fromRGB(240, 240, 255),
+		TextSecondary = Color3.fromRGB(140, 140, 165),
+		TextMuted     = Color3.fromRGB(80, 80, 100),
+		-- Status
+		Save          = Color3.fromRGB(72, 199, 142),
+		SaveDim       = Color3.fromRGB(40, 100, 75),
+		Delete        = Color3.fromRGB(240, 80, 90),
+		DeleteDim     = Color3.fromRGB(100, 40, 50),
+		Copy          = Color3.fromRGB(200, 200, 220),
+	}
+}
+
+--// State
+local targetFolder = Workspace:WaitForChild(CONFIG.JeepneyFolderName, 10)
+local guiContainer = (gethui and gethui()) or CoreGui:FindFirstChild("RobloxGui") or CoreGui
+local activeConnections = {}
+local uiInstances = {}
+local savedStickersDB = {}
+local isMinimized = false
+
+--// Utilities
+
+local function tween(obj, props, t, style, dir)
+	local info = TweenInfo.new(
+		t or CONFIG.UI.AnimSpeed,
+		style or Enum.EasingStyle.Quint,
+		dir or Enum.EasingDirection.Out
+	)
+	TweenService:Create(obj, info, props):Play()
+end
+
+local function applyCorner(parent, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or CONFIG.UI.CornerRadius)
+	c.Parent = parent
+	return c
+end
+
+local function applyStroke(parent, color, thickness, transparency)
+	local s = Instance.new("UIStroke")
+	s.Color = color or CONFIG.Colors.Border
+	s.Thickness = thickness or 1
+	s.Transparency = transparency or 0.5
+	s.Parent = parent
+	return s
+end
+
+local function applyPadding(parent, all, left, right, top, bottom)
+	local p = Instance.new("UIPadding")
+	if all then
+		p.PaddingLeft   = UDim.new(0, all)
+		p.PaddingRight  = UDim.new(0, all)
+		p.PaddingTop    = UDim.new(0, all)
+		p.PaddingBottom = UDim.new(0, all)
+	else
+		if left   then p.PaddingLeft   = UDim.new(0, left)   end
+		if right  then p.PaddingRight  = UDim.new(0, right)  end
+		if top    then p.PaddingTop    = UDim.new(0, top)    end
+		if bottom then p.PaddingBottom = UDim.new(0, bottom) end
+	end
+	p.Parent = parent
+	return p
+end
+
+local function makeLabel(parent, text, size, color, font, xAlign, yAlign)
+	local l = Instance.new("TextLabel")
+	l.Text = text or ""
+	l.TextSize = size or 13
+	l.TextColor3 = color or CONFIG.Colors.TextPrimary
+	l.Font = font or Enum.Font.GothamMedium
+	l.TextXAlignment = xAlign or Enum.TextXAlignment.Left
+	l.TextYAlignment = yAlign or Enum.TextYAlignment.Center
+	l.BackgroundTransparency = 1
+	l.Size = UDim2.new(1, 0, 1, 0)
+	l.Parent = parent
+	return l
+end
+
+--// File I/O
+local function loadSavedData()
+	if isfile and readfile then
+		local ok, raw = pcall(readfile, CONFIG.SaveFileName)
+		if ok and raw then
+			local ok2, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+			if ok2 and type(decoded) == "table" then
+				savedStickersDB = decoded
+			end
+		end
+	end
+end
+
+local function saveCurrentData()
+	if writefile then
+		local ok, enc = pcall(function() return HttpService:JSONEncode(savedStickersDB) end)
+		if ok then pcall(writefile, CONFIG.SaveFileName, enc) end
+	end
+end
+
+--// Cleanup
+local function cleanupOldGUI()
+	local existing = guiContainer:FindFirstChild("StickerVaultV3")
+	if existing then existing:Destroy() end
+	for _, c in ipairs(activeConnections) do
+		if c.Connected then c:Disconnect() end
+	end
+	table.clear(activeConnections)
+	table.clear(uiInstances)
+end
+
+--// Data helpers
+local function extractAssetId(tex)
+	return tex and string.match(tex, "%d+") or nil
+end
+
+local function getStickerFolder(jeepney)
+	local b = jeepney:FindFirstChild("Body")
+	if not b then return nil end
+	local s = b:FindFirstChild("Structure")
+	if not s then return nil end
+	local c = s:FindFirstChild("Customizables")
+	if not c then return nil end
+	return c:FindFirstChild("Stickers")
+end
+
+--// UI Build
+local function createUI()
+	cleanupOldGUI()
+
+	-----------------------------
+	-- Root
+	-----------------------------
+	local Screen = Instance.new("ScreenGui")
+	Screen.Name = "StickerVaultV3"
+	Screen.ResetOnSpawn = false
+	Screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	Screen.Parent = guiContainer
+
+	-----------------------------
+	-- Main Frame (glass card)
+	-----------------------------
+	local Main = Instance.new("Frame")
+	Main.Name = "Main"
+	Main.Size = UDim2.new(0, CONFIG.UI.Width, 0, CONFIG.UI.Height)
+	Main.Position = UDim2.new(0.5, -CONFIG.UI.Width / 2, 0.5, -CONFIG.UI.Height / 2)
+	Main.BackgroundColor3 = CONFIG.Colors.Background
+	Main.BorderSizePixel = 0
+	Main.Active = true
+	Main.Draggable = true
+	Main.ClipsDescendants = true
+	Main.Parent = Screen
+	applyCorner(Main, CONFIG.UI.CornerRadius)
+	applyStroke(Main, CONFIG.Colors.Border, 1, 0.3)
+
+	-- subtle gradient overlay
+	local Gradient = Instance.new("UIGradient")
+	Gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 22, 45)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 14)),
+	})
+	Gradient.Rotation = 135
+	Gradient.Parent = Main
+
+	-----------------------------
+	-- Top Bar
+	-----------------------------
+	local TopBar = Instance.new("Frame")
+	TopBar.Name = "TopBar"
+	TopBar.Size = UDim2.new(1, 0, 0, 48)
+	TopBar.BackgroundColor3 = CONFIG.Colors.SurfaceHigh
+	TopBar.BorderSizePixel = 0
+	TopBar.Parent = Main
+	applyCorner(TopBar, CONFIG.UI.CornerRadius)
+
+	-- fix bottom corners of topbar
+	local TopBarFix = Instance.new("Frame")
+	TopBarFix.Size = UDim2.new(1, 0, 0, 14)
+	TopBarFix.Position = UDim2.new(0, 0, 1, -14)
+	TopBarFix.BackgroundColor3 = CONFIG.Colors.SurfaceHigh
+	TopBarFix.BorderSizePixel = 0
+	TopBarFix.Parent = TopBar
+
+	local TopBarDivider = Instance.new("Frame")
+	TopBarDivider.Size = UDim2.new(1, 0, 0, 1)
+	TopBarDivider.Position = UDim2.new(0, 0, 1, -1)
+	TopBarDivider.BackgroundColor3 = CONFIG.Colors.Border
+	TopBarDivider.BorderSizePixel = 0
+	TopBarDivider.Parent = TopBar
+
+	-- Accent dot
+	local AccentDot = Instance.new("Frame")
+	AccentDot.Size = UDim2.new(0, 8, 0, 8)
+	AccentDot.Position = UDim2.new(0, 16, 0.5, -4)
+	AccentDot.BackgroundColor3 = CONFIG.Colors.Accent
+	AccentDot.BorderSizePixel = 0
+	AccentDot.Parent = TopBar
+	applyCorner(AccentDot, 4)
+
+	local TitleLabel = Instance.new("TextLabel")
+	TitleLabel.Size = UDim2.new(0, 180, 1, 0)
+	TitleLabel.Position = UDim2.new(0, 32, 0, 0)
+	TitleLabel.BackgroundTransparency = 1
+	TitleLabel.Text = CONFIG.Title
+	TitleLabel.TextColor3 = CONFIG.Colors.TextPrimary
+	TitleLabel.TextSize = 17
+	TitleLabel.Font = Enum.Font.GothamBold
+	TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	TitleLabel.Parent = TopBar
+
+	local SubLabel = Instance.new("TextLabel")
+	SubLabel.Size = UDim2.new(0, 180, 1, 0)
+	SubLabel.Position = UDim2.new(0, 32 + 102, 0, 0)
+	SubLabel.BackgroundTransparency = 1
+	SubLabel.Text = CONFIG.Subtitle
+	SubLabel.TextColor3 = CONFIG.Colors.Accent
+	SubLabel.TextSize = 9
+	SubLabel.Font = Enum.Font.GothamBold
+	SubLabel.TextXAlignment = Enum.TextXAlignment.Left
+	SubLabel.Parent = TopBar
+
+	-- Window control buttons (macOS style)
+	local function makeDot(xOffset, color)
+		local d = Instance.new("TextButton")
+		d.Size = UDim2.new(0, 12, 0, 12)
+		d.Position = UDim2.new(1, xOffset, 0.5, -6)
+		d.BackgroundColor3 = color
+		d.Text = ""
+		d.AutoButtonColor = false
+		d.BorderSizePixel = 0
+		d.Parent = TopBar
+		applyCorner(d, 6)
+		return d
+	end
+
+	local CloseBtn  = makeDot(-24,  Color3.fromRGB(240, 80,  80))
+	local MinBtn    = makeDot(-44,  Color3.fromRGB(255, 190, 50))
+
+	-- hover label hints
+	local function dotHover(btn, hoverColor, normalColor, label)
+		btn.MouseEnter:Connect(function()
+			tween(btn, {BackgroundColor3 = hoverColor}, 0.12)
+			btn.Text = label
+			btn.TextSize = 9
+			btn.TextColor3 = Color3.fromRGB(60, 40, 40)
+			btn.Font = Enum.Font.GothamBold
+		end)
+		btn.MouseLeave:Connect(function()
+			tween(btn, {BackgroundColor3 = normalColor}, 0.12)
+			btn.Text = ""
+		end)
+	end
+	dotHover(CloseBtn, Color3.fromRGB(255, 100, 100), Color3.fromRGB(240, 80, 80), "✕")
+	dotHover(MinBtn,   Color3.fromRGB(255, 210, 80),  Color3.fromRGB(255, 190, 50), "−")
+
+	-----------------------------
+	-- Collapsible Body
+	-----------------------------
+	local Body = Instance.new("Frame")
+	Body.Name = "Body"
+	Body.Size = UDim2.new(1, 0, 1, -48)
+	Body.Position = UDim2.new(0, 0, 0, 48)
+	Body.BackgroundTransparency = 1
+	Body.ClipsDescendants = true
+	Body.Parent = Main
+
+	-----------------------------
+	-- Preview Strip
+	-----------------------------
+	local PreviewOuter = Instance.new("Frame")
+	PreviewOuter.Size = UDim2.new(1, -24, 0, 180)
+	PreviewOuter.Position = UDim2.new(0, 12, 0, 12)
+	PreviewOuter.BackgroundColor3 = CONFIG.Colors.SurfaceMid
+	PreviewOuter.BorderSizePixel = 0
+	PreviewOuter.Parent = Body
+	applyCorner(PreviewOuter, 10)
+	applyStroke(PreviewOuter, CONFIG.Colors.Border, 1, 0.4)
+
+	local PreviewBg = Instance.new("UIGradient")
+	PreviewBg.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 25, 55)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 18, 28)),
+	})
+	PreviewBg.Rotation = 120
+	PreviewBg.Parent = PreviewOuter
+
+	local PreviewImage = Instance.new("ImageLabel")
+	PreviewImage.Size = UDim2.new(1, 0, 1, 0)
+	PreviewImage.Position = UDim2.new(0, 0, 0, 0)
+	PreviewImage.BackgroundTransparency = 1
+	PreviewImage.Image = ""
+	PreviewImage.ScaleType = Enum.ScaleType.Fit
+	PreviewImage.Parent = PreviewOuter
+
+	local PreviewPrompt = Instance.new("TextLabel")
+	PreviewPrompt.Size = UDim2.new(1, 0, 1, 0)
+	PreviewPrompt.Position = UDim2.new(0, 0, 0, 0)
+	PreviewPrompt.BackgroundTransparency = 1
+	PreviewPrompt.Text = "Click a sticker to preview"
+	PreviewPrompt.TextColor3 = CONFIG.Colors.TextMuted
+	PreviewPrompt.TextSize = 12
+	PreviewPrompt.Font = Enum.Font.Gotham
+	PreviewPrompt.TextXAlignment = Enum.TextXAlignment.Center
+	PreviewPrompt.TextYAlignment = Enum.TextYAlignment.Center
+	PreviewPrompt.Name = "Prompt"
+	PreviewPrompt.Parent = PreviewOuter
+
+	local OverlayGrad = Instance.new("Frame")
+	OverlayGrad.Size = UDim2.new(1, 0, 0, 50)
+	OverlayGrad.Position = UDim2.new(0, 0, 1, -50)
+	OverlayGrad.BackgroundColor3 = Color3.fromRGB(5, 5, 10)
+	OverlayGrad.BorderSizePixel = 0
+	OverlayGrad.Visible = false
+	OverlayGrad.Name = "Overlay"
+	OverlayGrad.ZIndex = 4
+	OverlayGrad.Parent = PreviewOuter
+	applyCorner(OverlayGrad, 10)
+	local OvGrad = Instance.new("UIGradient")
+	OvGrad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(1, 0.2),
+	})
+	OvGrad.Rotation = 90
+	OvGrad.Parent = OverlayGrad
+
+	local PreviewIDLabel = Instance.new("TextLabel")
+	PreviewIDLabel.Size = UDim2.new(1, -16, 0, 18)
+	PreviewIDLabel.Position = UDim2.new(0, 10, 1, -42)
+	PreviewIDLabel.BackgroundTransparency = 1
+	PreviewIDLabel.Text = ""
+	PreviewIDLabel.TextColor3 = CONFIG.Colors.TextPrimary
+	PreviewIDLabel.TextSize = 12
+	PreviewIDLabel.Font = Enum.Font.GothamBold
+	PreviewIDLabel.TextXAlignment = Enum.TextXAlignment.Left
+	PreviewIDLabel.Name = "IDLabel"
+	PreviewIDLabel.Visible = false
+	PreviewIDLabel.ZIndex = 5
+	PreviewIDLabel.Parent = PreviewOuter
+
+	local PreviewOwnerLabel = Instance.new("TextLabel")
+	PreviewOwnerLabel.Size = UDim2.new(1, -16, 0, 14)
+	PreviewOwnerLabel.Position = UDim2.new(0, 10, 1, -23)
+	PreviewOwnerLabel.BackgroundTransparency = 1
+	PreviewOwnerLabel.Text = ""
+	PreviewOwnerLabel.TextColor3 = CONFIG.Colors.TextSecondary
+	PreviewOwnerLabel.TextSize = 10
+	PreviewOwnerLabel.Font = Enum.Font.Gotham
+	PreviewOwnerLabel.TextXAlignment = Enum.TextXAlignment.Left
+	PreviewOwnerLabel.Name = "OwnerLabel"
+	PreviewOwnerLabel.Visible = false
+	PreviewOwnerLabel.ZIndex = 5
+	PreviewOwnerLabel.Parent = PreviewOuter
+
+	-----------------------------
+	-- Tab Bar
+	-----------------------------
+	local TabBar = Instance.new("Frame")
+	TabBar.Size = UDim2.new(1, -24, 0, 36)
+	TabBar.Position = UDim2.new(0, 12, 0, 204)
+	TabBar.BackgroundColor3 = CONFIG.Colors.SurfaceHigh
+	TabBar.BorderSizePixel = 0
+	TabBar.Parent = Body
+	applyCorner(TabBar, 8)
+	applyStroke(TabBar, CONFIG.Colors.Border, 1, 0.5)
+
+	local TabLayout = Instance.new("UIListLayout")
+	TabLayout.FillDirection = Enum.FillDirection.Horizontal
+	TabLayout.Padding = UDim.new(0, 0)
+	TabLayout.Parent = TabBar
+
+	local function makeTab(text, isFirst)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.5, 0, 1, 0)
+		btn.BackgroundColor3 = isFirst and CONFIG.Colors.Accent or Color3.fromRGB(0,0,0)
+		btn.BackgroundTransparency = isFirst and 0 or 1
+		btn.Text = text
+		btn.TextColor3 = isFirst and CONFIG.Colors.TextPrimary or CONFIG.Colors.TextSecondary
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 13
+		btn.AutoButtonColor = false
+		btn.Parent = TabBar
+		applyCorner(btn, 8)
+		return btn
+	end
+
+	local ActiveTabBtn = makeTab("  Active Vehicles", true)
+	local SavedTabBtn  = makeTab("  Saved Stickers", false)
+
+	-----------------------------
+	-- Scroll Frames
+	-----------------------------
+	local function makeScroll(visible)
+		local sf = Instance.new("ScrollingFrame")
+		sf.Size = UDim2.new(1, -24, 1, -256)
+		sf.Position = UDim2.new(0, 12, 0, 252)
+		sf.BackgroundTransparency = 1
+		sf.ScrollBarThickness = 3
+		sf.ScrollBarImageColor3 = CONFIG.Colors.Accent
+		sf.CanvasSize = UDim2.new(0, 0, 0, 0)
+		sf.Visible = visible
+		sf.BorderSizePixel = 0
+		sf.Parent = Body
+		local layout = Instance.new("UIListLayout")
+		layout.Padding = UDim.new(0, 6)
+		layout.Parent = sf
+		return sf, layout
+	end
+
+	local ActiveScroll, ActiveLayout = makeScroll(true)
+	local SavedScroll,  SavedLayout  = makeScroll(false)
+
+	-- Empty state labels
+	local function makeEmptyLabel(parent, msg)
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(1, 0, 0, 40)
+		lbl.BackgroundTransparency = 1
+		lbl.Text = msg
+		lbl.TextColor3 = CONFIG.Colors.TextMuted
+		lbl.TextSize = 12
+		lbl.Font = Enum.Font.Gotham
+		lbl.Name = "_EmptyLabel"
+		lbl.Parent = parent
+		return lbl
+	end
+	makeEmptyLabel(ActiveScroll, "No vehicles detected. Waiting...")
+	makeEmptyLabel(SavedScroll,  "No stickers saved yet.")
+
+	-----------------------------
+	-- Tab Switch Logic
+	-----------------------------
+	local function switchTab(toActive)
+		if toActive then
+			tween(ActiveTabBtn, {BackgroundColor3 = CONFIG.Colors.Accent, BackgroundTransparency = 0, TextColor3 = CONFIG.Colors.TextPrimary}, 0.15)
+			tween(SavedTabBtn,  {BackgroundColor3 = Color3.fromRGB(0,0,0), BackgroundTransparency = 1, TextColor3 = CONFIG.Colors.TextSecondary}, 0.15)
+			ActiveScroll.Visible = true
+			SavedScroll.Visible = false
+		else
+			tween(SavedTabBtn,  {BackgroundColor3 = CONFIG.Colors.Accent, BackgroundTransparency = 0, TextColor3 = CONFIG.Colors.TextPrimary}, 0.15)
+			tween(ActiveTabBtn, {BackgroundColor3 = Color3.fromRGB(0,0,0), BackgroundTransparency = 1, TextColor3 = CONFIG.Colors.TextSecondary}, 0.15)
+			ActiveScroll.Visible = false
+			SavedScroll.Visible = true
+		end
+	end
+
+	ActiveTabBtn.MouseButton1Click:Connect(function() switchTab(true) end)
+	SavedTabBtn.MouseButton1Click:Connect(function() switchTab(false) end)
+
+	-----------------------------
+	-- Minimize / Close Logic
+	-----------------------------
+	MinBtn.MouseButton1Click:Connect(function()
+		isMinimized = not isMinimized
+		if isMinimized then
+			tween(Main, {Size = UDim2.new(0, CONFIG.UI.Width, 0, CONFIG.UI.MinimizedHeight)}, CONFIG.UI.AnimSpeed)
+			tween(Body, {Position = UDim2.new(0, 0, 2, 0)}, CONFIG.UI.AnimSpeed) -- slide body away
+		else
+			tween(Main, {Size = UDim2.new(0, CONFIG.UI.Width, 0, CONFIG.UI.Height)}, CONFIG.UI.AnimSpeed)
+			tween(Body, {Position = UDim2.new(0, 0, 0, 48)}, CONFIG.UI.AnimSpeed)
+		end
+	end)
+
+	CloseBtn.MouseButton1Click:Connect(cleanupOldGUI)
+
+	-----------------------------
+	-- Save Instances
+	-----------------------------
+	uiInstances.PreviewImage    = PreviewImage
+	uiInstances.PreviewPrompt   = PreviewPrompt
+	uiInstances.PreviewIDLabel  = PreviewIDLabel
+	uiInstances.PreviewOwnerLabel = PreviewOwnerLabel
+	uiInstances.ActiveScroll    = ActiveScroll
+	uiInstances.SavedScroll     = SavedScroll
+	uiInstances.ActiveLayout    = ActiveLayout
+	uiInstances.SavedLayout     = SavedLayout
+end
+
+-----------------------------
+-- Sticker Entry Component
+-----------------------------
+local function createStickerEntry(parentScroll, id, ownerName, isSavedMode)
+	-- Remove empty state label on first entry
+	local emptyLbl = parentScroll:FindFirstChild("_EmptyLabel")
+	if emptyLbl then emptyLbl:Destroy() end
+
+	local Card = Instance.new("Frame")
+	Card.Size = UDim2.new(1, -8, 0, 52)
+	Card.BackgroundColor3 = CONFIG.Colors.SurfaceLow
+	Card.BorderSizePixel = 0
+	Card.Parent = parentScroll
+	applyCorner(Card, 8)
+	applyStroke(Card, CONFIG.Colors.Border, 1, 0.6)
+
+	-- Hover effect
+	local HoverBtn = Instance.new("TextButton")
+	HoverBtn.Size = UDim2.new(1, 0, 1, 0)
+	HoverBtn.BackgroundTransparency = 1
+	HoverBtn.Text = ""
+	HoverBtn.ZIndex = 2
+	HoverBtn.Parent = Card
+
+	HoverBtn.MouseEnter:Connect(function()
+		tween(Card, {BackgroundColor3 = CONFIG.Colors.SurfaceMid}, 0.12)
+		applyStroke(Card, CONFIG.Colors.AccentSoft, 1, 0)
+	end)
+	HoverBtn.MouseLeave:Connect(function()
+		tween(Card, {BackgroundColor3 = CONFIG.Colors.SurfaceLow}, 0.12)
+		applyStroke(Card, CONFIG.Colors.Border, 1, 0.6)
+	end)
+
+	-- Icon container
+	local IconBg = Instance.new("Frame")
+	IconBg.Size = UDim2.new(0, 38, 0, 38)
+	IconBg.Position = UDim2.new(0, 7, 0.5, -19)
+	IconBg.BackgroundColor3 = CONFIG.Colors.SurfaceMid
+	IconBg.BorderSizePixel = 0
+	IconBg.Parent = Card
+	applyCorner(IconBg, 6)
+
+	local Icon = Instance.new("ImageLabel")
+	Icon.Size = UDim2.new(1, -6, 1, -6)
+	Icon.Position = UDim2.new(0, 3, 0, 3)
+	Icon.BackgroundTransparency = 1
+	Icon.Image = "rbxassetid://" .. id
+	Icon.ScaleType = Enum.ScaleType.Fit
+	Icon.Parent = IconBg
+
+	-- Info
+	local IDLabel = Instance.new("TextLabel")
+	IDLabel.Size = UDim2.new(0, 160, 0, 20)
+	IDLabel.Position = UDim2.new(0, 55, 0, 7)
+	IDLabel.BackgroundTransparency = 1
+	IDLabel.Text = id
+	IDLabel.TextColor3 = CONFIG.Colors.TextPrimary
+	IDLabel.TextSize = 13
+	IDLabel.Font = Enum.Font.GothamBold
+	IDLabel.TextXAlignment = Enum.TextXAlignment.Left
+	IDLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	IDLabel.Parent = Card
+
+	local OwnerLabel = Instance.new("TextLabel")
+	OwnerLabel.Size = UDim2.new(0, 160, 0, 16)
+	OwnerLabel.Position = UDim2.new(0, 55, 0, 28)
+	OwnerLabel.BackgroundTransparency = 1
+	OwnerLabel.Text = "by " .. ownerName
+	OwnerLabel.TextColor3 = CONFIG.Colors.TextSecondary
+	OwnerLabel.TextSize = 11
+	OwnerLabel.Font = Enum.Font.Gotham
+	OwnerLabel.TextXAlignment = Enum.TextXAlignment.Left
+	OwnerLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	OwnerLabel.Parent = Card
+
+	-- Pill button helper
+	local function makePill(text, bgColor, textColor, rightOffset, width)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0, width or 54, 0, 26)
+		btn.Position = UDim2.new(1, rightOffset, 0.5, -13)
+		btn.BackgroundColor3 = bgColor
+		btn.Text = text
+		btn.TextColor3 = textColor
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 11
+		btn.AutoButtonColor = false
+		btn.ZIndex = 3
+		btn.Parent = Card
+		applyCorner(btn, 6)
+		return btn
+	end
+
+	local CopyBtn = makePill("COPY", CONFIG.Colors.SurfaceMid, CONFIG.Colors.Copy, -130)
+	applyStroke(CopyBtn, CONFIG.Colors.Border, 1, 0.3)
+
+	local ActionBtn
+	if isSavedMode then
+		ActionBtn = makePill("REMOVE", CONFIG.Colors.DeleteDim, CONFIG.Colors.Delete, -68, 60)
+		applyStroke(ActionBtn, CONFIG.Colors.Delete, 1, 0.5)
+	else
+		if savedStickersDB[id] then
+			ActionBtn = makePill("SAVED ✓", CONFIG.Colors.SaveDim, CONFIG.Colors.Save, -68, 60)
+			ActionBtn.Active = false
+		else
+			ActionBtn = makePill("SAVE", CONFIG.Colors.SaveDim, CONFIG.Colors.Save, -68, 60)
+			applyStroke(ActionBtn, CONFIG.Colors.Save, 1, 0.5)
+		end
+	end
+
+	-----------------------------
+	-- Button hover pulse
+	local function pillHover(btn, color, dimColor)
+		btn.MouseEnter:Connect(function()
+			tween(btn, {BackgroundColor3 = color}, 0.12)
+		end)
+		btn.MouseLeave:Connect(function()
+			tween(btn, {BackgroundColor3 = dimColor}, 0.12)
+		end)
+	end
+
+	pillHover(CopyBtn, CONFIG.Colors.SurfaceHigh, CONFIG.Colors.SurfaceMid)
+
+	if isSavedMode then
+		pillHover(ActionBtn, CONFIG.Colors.Delete, CONFIG.Colors.DeleteDim)
+	elseif not savedStickersDB[id] then
+		pillHover(ActionBtn, CONFIG.Colors.Save, CONFIG.Colors.SaveDim)
+	end
+
+	-----------------------------
+	-- Click Handlers
+	HoverBtn.MouseButton1Click:Connect(function()
+		uiInstances.PreviewImage.Image = "rbxassetid://" .. id
+		uiInstances.PreviewPrompt.Visible = false
+		local overlay = uiInstances.PreviewImage.Parent:FindFirstChild("Overlay")
+		if overlay then overlay.Visible = true end
+		uiInstances.PreviewIDLabel.Visible = true
+		uiInstances.PreviewIDLabel.Text = "ID: " .. id
+		uiInstances.PreviewOwnerLabel.Visible = true
+		uiInstances.PreviewOwnerLabel.Text = "Owner: " .. ownerName
+	end)
+
+	CopyBtn.MouseButton1Click:Connect(function()
+		if setclipboard then
+			pcall(setclipboard, id)
+			CopyBtn.Text = "✓"
+			task.wait(1.2)
+			CopyBtn.Text = "COPY"
+		end
+	end)
+
+	ActionBtn.MouseButton1Click:Connect(function()
+		if isSavedMode then
+			savedStickersDB[id] = nil
+			saveCurrentData()
+			tween(Card, {BackgroundTransparency = 1}, 0.2)
+			task.wait(0.2)
+			Card:Destroy()
+			refreshActiveUI()
+		else
+			if savedStickersDB[id] then return end
+			savedStickersDB[id] = { owner = ownerName }
+			saveCurrentData()
+			ActionBtn.Text = "SAVED ✓"
+			tween(ActionBtn, {BackgroundColor3 = CONFIG.Colors.SaveDim}, 0.15)
+			ActionBtn.Active = false
+			refreshSavedUI()
+		end
+	end)
+end
+
+-----------------------------
+-- Refresh Helpers
+-----------------------------
+function refreshActiveUI()
+	if not uiInstances.ActiveScroll then return end
+	for _, c in ipairs(uiInstances.ActiveScroll:GetChildren()) do
+		if c:IsA("GuiObject") then c:Destroy() end
+	end
+
+	local count = 0
+	if targetFolder then
+		for _, jeepney in ipairs(targetFolder:GetChildren()) do
+			local sf = getStickerFolder(jeepney)
+			if sf then
+				for _, obj in ipairs(sf:GetChildren()) do
+					local decal = obj:FindFirstChildWhichIsA("Decal") or obj:FindFirstChildWhichIsA("Texture")
+					if decal and decal.Texture ~= "" then
+						local id = extractAssetId(decal.Texture)
+						if id then
+							createStickerEntry(uiInstances.ActiveScroll, id, jeepney.Name, false)
+							count += 1
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if count == 0 then
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(1, 0, 0, 40)
+		lbl.BackgroundTransparency = 1
+		lbl.Text = count == 0 and "No vehicles detected. Waiting..." or ""
+		lbl.TextColor3 = CONFIG.Colors.TextMuted
+		lbl.TextSize = 12
+		lbl.Font = Enum.Font.Gotham
+		lbl.Name = "_EmptyLabel"
+		lbl.Parent = uiInstances.ActiveScroll
+	end
+
+	task.defer(function()
+		uiInstances.ActiveScroll.CanvasSize = UDim2.new(0, 0, 0, uiInstances.ActiveLayout.AbsoluteContentSize.Y + 10)
+	end)
+end
+
+function refreshSavedUI()
+	if not uiInstances.SavedScroll then return end
+	for _, c in ipairs(uiInstances.SavedScroll:GetChildren()) do
+		if c:IsA("GuiObject") then c:Destroy() end
+	end
+
+	local count = 0
+	for id, data in pairs(savedStickersDB) do
+		createStickerEntry(uiInstances.SavedScroll, id, data.owner, true)
+		count += 1
+	end
+
+	if count == 0 then
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(1, 0, 0, 40)
+		lbl.BackgroundTransparency = 1
+		lbl.Text = "No stickers saved yet."
+		lbl.TextColor3 = CONFIG.Colors.TextMuted
+		lbl.TextSize = 12
+		lbl.Font = Enum.Font.Gotham
+		lbl.Name = "_EmptyLabel"
+		lbl.Parent = uiInstances.SavedScroll
+	end
+
+	task.defer(function()
+		uiInstances.SavedScroll.CanvasSize = UDim2.new(0, 0, 0, uiInstances.SavedLayout.AbsoluteContentSize.Y + 10)
+	end)
+end
+
+-----------------------------
+-- Main
+-----------------------------
+loadSavedData()
+createUI()
+refreshSavedUI()
+
+if targetFolder then
+	refreshActiveUI()
+
+	table.insert(activeConnections, targetFolder.ChildAdded:Connect(function()
+		task.wait(1.5)
+		refreshActiveUI()
+	end))
+	table.insert(activeConnections, targetFolder.ChildRemoved:Connect(function()
+		refreshActiveUI()
+	end))
+else
+	warn("[StickerVault] Folder 'Jeepnies' not found in Workspace.")
+end
