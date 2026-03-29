@@ -1,0 +1,350 @@
+local player = game:GetService("Players").LocalPlayer
+if not player then
+    warn("Player not found! Make sure this is a LocalScript in StarterGui or StarterPlayerScripts")
+    return
+end
+
+local playerGui = player:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ControlSelectorGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- Create main frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 350, 0, 300)
+mainFrame.Position = UDim2.new(0.5, -175, 0.5, -150)
+mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
+mainFrame.BorderSizePixel = 3
+mainFrame.BorderColor3 = Color3.fromRGB(0, 255, 100)
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 12)
+mainCorner.Parent = mainFrame
+
+-- Add animated binary background
+local binaryContainer = Instance.new("Frame")
+binaryContainer.Name = "BinaryContainer"
+binaryContainer.Size = UDim2.new(1, 0, 1, 0)
+binaryContainer.BackgroundTransparency = 1
+binaryContainer.ClipsDescendants = true
+binaryContainer.Parent = mainFrame
+
+-- Create multiple binary columns
+local function createBinaryColumn(xPos)
+    local column = Instance.new("TextLabel")
+    column.Size = UDim2.new(0, 20, 2, 0)
+    column.Position = UDim2.new(0, xPos, -1, 0)
+    column.BackgroundTransparency = 1
+    column.TextColor3 = Color3.fromRGB(0, 255, 100)
+    column.TextTransparency = 0.7
+    column.Font = Enum.Font.Code
+    column.TextSize = 12
+    column.TextXAlignment = Enum.TextXAlignment.Center
+    column.Parent = binaryContainer
+    
+    -- Generate random binary text
+    local binaryText = ""
+    for i = 1, 100 do
+        binaryText = binaryText .. (math.random(0, 1)) .. "\n"
+    end
+    column.Text = binaryText
+    
+    -- Animate falling
+    spawn(function()
+        local speed = math.random(3, 7)
+        while column and column.Parent do
+            column:TweenPosition(
+                UDim2.new(0, xPos, 1, 0),
+                Enum.EasingDirection.InOut,
+                Enum.EasingStyle.Linear,
+                speed,
+                true
+            )
+            wait(speed)
+            column.Position = UDim2.new(0, xPos, -1, 0)
+            
+            -- Regenerate binary text
+            binaryText = ""
+            for i = 1, 100 do
+                binaryText = binaryText .. (math.random(0, 1)) .. "\n"
+            end
+            column.Text = binaryText
+        end
+    end)
+    
+    return column
+end
+
+-- Create multiple columns across the frame
+for i = 0, 350, 25 do
+    createBinaryColumn(i)
+end
+
+-- Dark overlay to make binary more subtle
+local overlay = Instance.new("Frame")
+overlay.Name = "Overlay"
+overlay.Size = UDim2.new(1, 0, 1, 0)
+overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+overlay.BackgroundTransparency = 0.4
+overlay.BorderSizePixel = 0
+overlay.Parent = mainFrame
+
+-- Add scanline effect
+local scanline = Instance.new("Frame")
+scanline.Name = "Scanline"
+scanline.Size = UDim2.new(1, 0, 0, 2)
+scanline.Position = UDim2.new(0, 0, 0, 0)
+scanline.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+scanline.BackgroundTransparency = 0.5
+scanline.BorderSizePixel = 0
+scanline.Parent = overlay
+
+-- Animate scanline
+spawn(function()
+    while wait(0.03) do
+        if scanline and scanline.Parent then
+            scanline:TweenPosition(
+                UDim2.new(0, 0, 1, 0),
+                Enum.EasingDirection.InOut,
+                Enum.EasingStyle.Linear,
+                2,
+                true
+            )
+            wait(2)
+            scanline.Position = UDim2.new(0, 0, 0, 0)
+        else
+            break
+        end
+    end
+end)
+
+-- Create top bar for dragging
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Size = UDim2.new(1, 0, 0, 45)
+topBar.Position = UDim2.new(0, 0, 0, 0)
+topBar.BackgroundColor3 = Color3.fromRGB(5, 5, 10)
+topBar.BorderSizePixel = 0
+topBar.Parent = mainFrame
+
+local topBarCorner = Instance.new("UICorner")
+topBarCorner.CornerRadius = UDim.new(0, 12)
+topBarCorner.Parent = topBar
+
+-- Top bar accent line
+local accentLine = Instance.new("Frame")
+accentLine.Size = UDim2.new(1, 0, 0, 2)
+accentLine.Position = UDim2.new(0, 0, 1, -2)
+accentLine.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+accentLine.BorderSizePixel = 0
+accentLine.Parent = topBar
+
+-- Create title label
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "TitleLabel"
+titleLabel.Size = UDim2.new(1, -90, 1, 0)
+titleLabel.Position = UDim2.new(0, 15, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Kupal Device Changer"
+titleLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+titleLabel.Font = Enum.Font.Code
+titleLabel.TextSize = 18
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = topBar
+
+-- Glowing effect for title
+local titleGlow = Instance.new("UIStroke")
+titleGlow.Color = Color3.fromRGB(0, 255, 100)
+titleGlow.Thickness = 1
+titleGlow.Transparency = 0.5
+titleGlow.Parent = titleLabel
+
+-- Minimize button
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Name = "MinimizeButton"
+minimizeButton.Size = UDim2.new(0, 35, 0, 35)
+minimizeButton.Position = UDim2.new(1, -75, 0, 5)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+minimizeButton.BorderSizePixel = 2
+minimizeButton.BorderColor3 = Color3.fromRGB(0, 255, 100)
+minimizeButton.Text = "−"
+minimizeButton.TextColor3 = Color3.fromRGB(0, 255, 100)
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.TextSize = 24
+minimizeButton.Parent = topBar
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 6)
+minCorner.Parent = minimizeButton
+
+-- Close button
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 35, 0, 35)
+closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+closeButton.BorderSizePixel = 2
+closeButton.BorderColor3 = Color3.fromRGB(255, 0, 100)
+closeButton.Text = "×"
+closeButton.TextColor3 = Color3.fromRGB(255, 0, 100)
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 24
+closeButton.Parent = topBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 6)
+closeCorner.Parent = closeButton
+
+-- Content frame (for buttons)
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, 0, 1, -45)
+contentFrame.Position = UDim2.new(0, 0, 0, 45)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+
+-- Function to create buttons
+local function createButton(text, position, controlType)
+    local button = Instance.new("TextButton")
+    button.Name = text .. "Button"
+    button.Size = UDim2.new(0, 310, 0, 45)
+    button.Position = position
+    button.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    button.BorderSizePixel = 2
+    button.BorderColor3 = Color3.fromRGB(0, 200, 80)
+    button.Text = "[ " .. text .. " ]"
+    button.TextColor3 = Color3.fromRGB(0, 255, 100)
+    button.Font = Enum.Font.Code
+    button.TextSize = 16
+    button.Parent = contentFrame
+    
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 8)
+    buttonCorner.Parent = button
+    
+    local buttonGlow = Instance.new("UIStroke")
+    buttonGlow.Color = Color3.fromRGB(0, 255, 100)
+    buttonGlow.Thickness = 0
+    buttonGlow.Transparency = 1
+    buttonGlow.Parent = button
+    
+    -- Hover effect
+    button.MouseEnter:Connect(function()
+        button.BackgroundColor3 = Color3.fromRGB(0, 50, 20)
+        buttonGlow.Thickness = 2
+        buttonGlow.Transparency = 0.3
+    end)
+    
+    button.MouseLeave:Connect(function()
+        button.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+        buttonGlow.Thickness = 0
+        buttonGlow.Transparency = 1
+    end)
+    
+    -- Click event
+    button.MouseButton1Click:Connect(function()
+        local ReplicatedStorage = game:GetService('ReplicatedStorage')
+        ReplicatedStorage.Remotes.Replication.Fighter.SetControls:FireServer(controlType)
+        
+        -- Visual feedback
+        button.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+        button.TextColor3 = Color3.fromRGB(0, 0, 0)
+        wait(0.3)
+        button.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+        button.TextColor3 = Color3.fromRGB(0, 255, 100)
+        
+        print("⚡ Controls set to: " .. controlType)
+    end)
+    
+    return button
+end
+
+-- Create buttons for each control type (including VR)
+createButton("TOUCH", UDim2.new(0, 20, 0, 15), "Touch")
+createButton("GAMEPAD", UDim2.new(0, 20, 0, 70), "Gamepad")
+createButton("MOUSE & KEYBOARD", UDim2.new(0, 20, 0, 125), "MouseKeyboard")
+createButton("VR", UDim2.new(0, 20, 0, 180), "VR")
+
+-- Make frame draggable
+local UserInputService = game:GetService("UserInputService")
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+topBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+topBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- Minimize functionality
+local isMinimized = false
+minimizeButton.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        mainFrame:TweenSize(UDim2.new(0, 350, 0, 45), Enum.EasingDirection.Out, Enum.EasingStyle.Quint, 0.3, true)
+        minimizeButton.Text = "+"
+        contentFrame.Visible = false
+    else
+        mainFrame:TweenSize(UDim2.new(0, 350, 0, 300), Enum.EasingDirection.Out, Enum.EasingStyle.Quint, 0.3, true)
+        minimizeButton.Text = "−"
+        contentFrame.Visible = true
+    end
+end)
+
+-- Close functionality
+closeButton.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+-- Hover effects for minimize and close buttons
+minimizeButton.MouseEnter:Connect(function()
+    minimizeButton.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+    minimizeButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+end)
+
+minimizeButton.MouseLeave:Connect(function()
+    minimizeButton.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    minimizeButton.TextColor3 = Color3.fromRGB(0, 255, 100)
+end)
+
+closeButton.MouseEnter:Connect(function()
+    closeButton.BackgroundColor3 = Color3.fromRGB(255, 0, 100)
+    closeButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+end)
+
+closeButton.MouseLeave:Connect(function()
+    closeButton.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    closeButton.TextColor3 = Color3.fromRGB(255, 0, 100)
+end)
