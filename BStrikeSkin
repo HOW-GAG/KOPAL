@@ -1,0 +1,1097 @@
+--[[
+    ╔══════════════════════════════════════════════════════╗
+    ║         Blox Strike — Premium GUI v1.0              ║
+    ║         Custom Knife + Skin Changer UI              ║
+    ╚══════════════════════════════════════════════════════╝
+]]
+
+--// Services
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
+local ContextActionService = game:GetService("ContextActionService")
+local UserInputService = game:GetService("UserInputService")
+local RS               = game:GetService("ReplicatedStorage")
+local HttpService      = game:GetService("HttpService") -- ← ADDED for JSON encode/decode
+
+--// ─────────────────────────────────────────────────────────────
+--// CONFIG
+--// ─────────────────────────────────────────────────────────────
+local CFG = {
+    GUI_W        = 540,
+    GUI_H        = 580,
+    TOGGLE_KEY   = Enum.KeyCode.F4,
+
+    BG0          = Color3.fromRGB(6,   6,  12),
+    BG1          = Color3.fromRGB(11,  11, 20),
+    BG2          = Color3.fromRGB(17,  17, 30),
+    BG3          = Color3.fromRGB(24,  24, 40),
+    BG4          = Color3.fromRGB(33,  33, 54),
+    BG5          = Color3.fromRGB(44,  44, 68),
+
+    ACCENT       = Color3.fromRGB(122, 162, 255),
+    ACCENT2      = Color3.fromRGB(170, 122, 255),
+    SUCCESS      = Color3.fromRGB(60,  210, 140),
+    DANGER       = Color3.fromRGB(238, 80,  80),
+    WARN         = Color3.fromRGB(255, 185, 60),
+
+    TEXT1        = Color3.fromRGB(230, 230, 255),
+    TEXT2        = Color3.fromRGB(148, 148, 188),
+    TEXT3        = Color3.fromRGB(80,  80,  120),
+}
+
+--// ─────────────────────────────────────────────────────────────
+--// GAME LOGIC
+--// ─────────────────────────────────────────────────────────────
+local player     = Players.LocalPlayer
+local camera     = workspace.CurrentCamera
+local Characters = workspace:WaitForChild("Characters")
+
+RS.Assets.Weapons.Karambit.Camera.ViewmodelLight.Transparency = 1
+
+local ATTACK_COOLDOWN = 1
+local ACTION_INSPECT  = "InspectKnifeAction"
+local ACTION_ATTACK   = "AttackKnifeAction"
+
+-- ↓↓↓ These are declared here but VALUES come from save file below ↓↓↓
+local scriptRunning  = false
+local selectedKnife  = "Butterfly Knife"
+local spawned        = false
+local inspecting     = false
+local swinging       = false
+local lastAttackTime = 0
+
+local vm, animator
+local equipAnim, idleAnim, inspectAnim
+local HeavySwingAnim, Swing1Anim, Swing2Anim
+
+local knives = {
+    ["Karambit"]        = {Offset = CFrame.new(0,-1.5, 1.5)},
+    ["Butterfly Knife"] = {Offset = CFrame.new(0,-1.5, 1.5)},
+    ["M9 Bayonet"]      = {Offset = CFrame.new(0,-1.5, 1)},
+    ["Flip Knife"]      = {Offset = CFrame.new(0,-1.5, 1.25)},
+    ["Gut Knife"]       = {Offset = CFrame.new(0,-1.5, 0.5)},
+}
+
+local function isAlive()
+    local t  = Characters:FindFirstChild("Terrorists")
+    local ct = Characters:FindFirstChild("Counter-Terrorists")
+    return (t and t:FindFirstChild(player.Name)) or (ct and ct:FindFirstChild(player.Name))
+end
+local function getKnifeInCamera()
+    return camera:FindFirstChild("T Knife") or camera:FindFirstChild("CT Knife")
+end
+local function cleanPart(part)
+    if not part:IsA("BasePart") then return end
+    part.CanCollide=false; part.Anchored=false
+    part.CastShadow=false; part.CanTouch=false; part.CanQuery=false
+end
+local function disableCollisions(model)
+    for _,p in model:GetDescendants() do cleanPart(p) end
+end
+local function hideOriginalKnife(knife)
+    for _,p in knife:GetDescendants() do
+        if p:IsA("BasePart") or p:IsA("MeshPart") then p.Transparency=1 end
+        if p:IsA("Texture") then p.Transparency=1 end
+    end
+end
+local function playSound(folder, name)
+    local ws = RS.Sounds:FindFirstChild(selectedKnife)
+    if not ws then return end
+    local s = ws:WaitForChild(folder):WaitForChild(name):Clone()
+    s.Parent = camera; s:Play()
+    s.Ended:Once(function() s:Destroy() end)
+    return s
+end
+local function attachAsset(folder, armPartName, assetModelName, finalName, offset)
+    local arm = vm:FindFirstChild(armPartName); if not arm then return end
+    local mesh = folder:WaitForChild(assetModelName):Clone()
+    cleanPart(mesh); mesh.Name=finalName; mesh.Parent=arm
+    local m=Instance.new("Motor6D"); m.Part0=arm; m.Part1=mesh; m.C0=offset; m.Parent=arm
+end
+
+local function handleAction(actionName, inputState)
+    if inputState ~= Enum.UserInputState.Begin then return Enum.ContextActionResult.Pass end
+    if not spawned or not animator or not isAlive() then return Enum.ContextActionResult.Pass end
+
+    if actionName == ACTION_INSPECT then
+        if (equipAnim and equipAnim.IsPlaying) or inspecting or swinging then return Enum.ContextActionResult.Pass end
+        inspecting=true; if idleAnim then idleAnim:Stop() end
+        inspectAnim:Play()
+        inspectAnim.Stopped:Once(function() inspecting=false end)
+
+    elseif actionName == ACTION_ATTACK then
+        local now = os.clock()
+        if (equipAnim and equipAnim.IsPlaying) or (now-lastAttackTime < ATTACK_COOLDOWN) then return Enum.ContextActionResult.Pass end
+        lastAttackTime=now
+        if inspecting then inspecting=false; if inspectAnim then inspectAnim:Stop() end end
+        swinging=true; if idleAnim then idleAnim:Stop() end
+        local anims={HeavySwingAnim,Swing1Anim,Swing2Anim}
+        local chosen=anims[math.random(1,#anims)]
+        local sfx=(chosen==HeavySwingAnim and "HitOne") or (chosen==Swing1Anim and "HitTwo") or "HitThree"
+        chosen:Play()
+        local s=playSound(sfx,"1"); if s then s.Volume=5 end
+        chosen.Stopped:Once(function() swinging=false end)
+    end
+    return Enum.ContextActionResult.Pass
+end
+
+local function removeViewmodel()
+    spawned=false
+    ContextActionService:UnbindAction(ACTION_INSPECT)
+    ContextActionService:UnbindAction(ACTION_ATTACK)
+    if vm then vm:Destroy(); vm=nil end
+    animator=nil; inspecting=false; swinging=false
+end
+
+local function spawnViewmodel(knife)
+    if spawned or not scriptRunning then return end
+    local myModel=isAlive(); if not myModel then return end
+    spawned=true
+    local knifeTemplate=RS.Assets.Weapons:WaitForChild(selectedKnife)
+    local knifeOffset=knives[selectedKnife].Offset
+    vm=knifeTemplate:WaitForChild("Camera"):Clone()
+    vm.Name=selectedKnife; vm.Parent=camera
+    disableCollisions(vm); hideOriginalKnife(knife)
+    if myModel.Parent.Name=="Terrorists" then
+        local tG=RS.Assets.Weapons:WaitForChild("T Glove")
+        attachAsset(tG,"Left Arm","Left Arm","Glove",CFrame.new(0,0,-1.5))
+        attachAsset(tG,"Right Arm","Right Arm","Glove",CFrame.new(0,0,-1.5))
+    else
+        local sl=RS.Assets.Sleeves:WaitForChild("IDF")
+        local ctG=RS.Assets.Weapons:WaitForChild("CT Glove")
+        attachAsset(sl,"Left Arm","Left Arm","Sleeve",CFrame.new(0,0,0.5))
+        attachAsset(ctG,"Left Arm","Left Arm","Glove",CFrame.new(0,0,-1.5))
+        attachAsset(sl,"Right Arm","Right Arm","Sleeve",CFrame.new(0,0,0.5))
+        attachAsset(ctG,"Right Arm","Right Arm","Glove",CFrame.new(0,0,-1.5))
+    end
+    local ac=vm:FindFirstChildOfClass("AnimationController") or vm:FindFirstChildOfClass("Animator")
+    animator=ac:FindFirstChildWhichIsA("Animator") or ac
+    local af=RS.Assets.WeaponAnimations:WaitForChild(selectedKnife):WaitForChild("CameraAnimations")
+    equipAnim      = animator:LoadAnimation(af:WaitForChild("Equip"))
+    idleAnim       = animator:LoadAnimation(af:WaitForChild("Idle"))
+    inspectAnim    = animator:LoadAnimation(af:WaitForChild("Inspect"))
+    HeavySwingAnim = animator:LoadAnimation(af:WaitForChild("Heavy Swing"))
+    Swing1Anim     = animator:LoadAnimation(af:WaitForChild("Swing1"))
+    Swing2Anim     = animator:LoadAnimation(af:WaitForChild("Swing2"))
+    vm:SetPrimaryPartCFrame(camera.CFrame*CFrame.new(0,-1.5,5))
+    TweenService:Create(vm.PrimaryPart,TweenInfo.new(0.2,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{CFrame=camera.CFrame*knifeOffset}):Play()
+    equipAnim:Play(); playSound("Equip","1")
+    ContextActionService:BindAction(ACTION_INSPECT,handleAction,false,Enum.KeyCode.F)
+    ContextActionService:BindAction(ACTION_ATTACK, handleAction,false,Enum.UserInputType.MouseButton1)
+end
+
+RunService.RenderStepped:Connect(function()
+    if not scriptRunning or not vm or not vm.PrimaryPart then return end
+    vm.PrimaryPart.CFrame=camera.CFrame*knives[selectedKnife].Offset
+    if not (equipAnim and equipAnim.IsPlaying) and not inspecting and not swinging then
+        if idleAnim and not idleAnim.IsPlaying then idleAnim:Play() end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        local living=isAlive(); local curKnife=getKnifeInCamera()
+        if scriptRunning and living and curKnife and not spawned then spawnViewmodel(curKnife)
+        elseif (not scriptRunning or not curKnife or not living) and spawned then removeViewmodel() end
+        task.wait(0.1)
+    end
+end)
+
+--// Skin changer logic
+local SkinChangerEnabled = false
+local SelectedSkins      = {}
+local COOLDOWN           = 0.1
+local WEAR               = "Factory New"
+
+local CT_ONLY  = {["USP-S"]=true,["Five-SeveN"]=true,["MP9"]=true,["FAMAS"]=true,["M4A1-S"]=true,["M4A4"]=true,["AUG"]=true}
+local SHARED   = {["P250"]=true,["Desert Eagle"]=true,["Dual Berettas"]=true,["Negev"]=true,["P90"]=true,["Nova"]=true,["XM1014"]=true,["AWP"]=true,["SSG 08"]=true}
+local KNIVES   = {["Karambit"]=true,["Butterfly Knife"]=true,["M9 Bayonet"]=true,["Flip Knife"]=true,["Gut Knife"]=true,["T Knife"]=true,["CT Knife"]=true}
+local GLOVES   = {["Sports Gloves"]=true}
+local IgnoreFolders = {["HE Grenade"]=true,["Incendiary Grenade"]=true,["Molotov"]=true,["Smoke Grenade"]=true,["Flashbang"]=true,["Decoy Grenade"]=true,["C4"]=true,["CT Glove"]=true,["T Glove"]=true}
+
+local SkinsFolder = RS:WaitForChild("Assets"):WaitForChild("Skins")
+
+local function isAlive_Skin()
+    local t=Characters:FindFirstChild("Terrorists"); local ct=Characters:FindFirstChild("Counter-Terrorists")
+    return (t and t:FindFirstChild(player.Name)) or (ct and ct:FindFirstChild(player.Name))
+end
+
+local function applyWeaponSkin(model)
+    if not model or not SkinChangerEnabled or not isAlive_Skin() then return end
+    local skinName=SelectedSkins[model.Name]; if not skinName then return end
+    pcall(function()
+        local sf=SkinsFolder:FindFirstChild(model.Name); if not sf then return end
+        local st=sf:FindFirstChild(skinName)
+        local src=st and st:FindFirstChild("Camera") and st.Camera:FindFirstChild(WEAR)
+        if not src then return end
+        for _,obj in camera:GetChildren() do
+            local left=obj:FindFirstChild("Left Arm"); local right=obj:FindFirstChild("Right Arm")
+            if left or right then
+                local gf=SkinsFolder:FindFirstChild("Sports Gloves")
+                local gs=gf and gf:FindFirstChild(SelectedSkins["Sports Gloves"])
+                local gsrc=gs and gs:FindFirstChild("Camera") and gs.Camera:FindFirstChild(WEAR)
+                if gsrc then
+                    for _,side in {"Left Arm","Right Arm"} do
+                        local arm=obj:FindFirstChild(side); local asrc=gsrc:FindFirstChild(side)
+                        if arm and asrc then
+                            local gm=arm:FindFirstChild("Glove")
+                            if gm then
+                                local ex=gm:FindFirstChildOfClass("SurfaceAppearance"); if ex then ex:Destroy() end
+                                local cl=asrc:Clone(); cl.Name="SurfaceAppearance"; cl.Parent=gm
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if not GLOVES[model.Name] then
+            local wf=model:FindFirstChild("Weapon")
+            if wf then
+                for _,part in wf:GetDescendants() do
+                    if part:IsA("BasePart") then
+                        local ns=src:FindFirstChild(part.Name)
+                        if ns then
+                            local ex=part:FindFirstChildOfClass("SurfaceAppearance"); if ex then ex:Destroy() end
+                            local cl=ns:Clone(); cl.Name="SurfaceAppearance"; cl.Parent=part
+                        end
+                    end
+                end
+            end
+        end
+        model:SetAttribute("SkinApplied",skinName)
+    end)
+end
+
+camera.ChildAdded:Connect(function(obj)
+    if not SkinChangerEnabled or not isAlive_Skin() then return end
+    task.wait(COOLDOWN); applyWeaponSkin(obj)
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if SkinChangerEnabled and isAlive_Skin() then
+            for _,obj in camera:GetChildren() do
+                if SelectedSkins[obj.Name] and obj:GetAttribute("SkinApplied")~=SelectedSkins[obj.Name] then
+                    applyWeaponSkin(obj)
+                end
+            end
+        end
+    end
+end)
+
+--// ═════════════════════════════════════════════════════════════
+--// SETTINGS SAVE / LOAD  ← INSERTED HERE, before GUI is built
+--// ═════════════════════════════════════════════════════════════
+local SAVE_FILE = "BloxStrike_Settings.json"
+
+local function saveSettings()
+    local data = {
+        scriptRunning      = scriptRunning,
+        SkinChangerEnabled = SkinChangerEnabled,
+        selectedKnife      = selectedKnife,
+        SelectedSkins      = SelectedSkins,
+    }
+    local ok, err = pcall(function()
+        writefile(SAVE_FILE, HttpService:JSONEncode(data))
+    end)
+    if not ok then warn("[BloxStrike] Failed to save: "..tostring(err)) end
+end
+
+local function loadSettings()
+    if not isfile(SAVE_FILE) then return nil end
+    local ok, result = pcall(function()
+        return HttpService:JSONDecode(readfile(SAVE_FILE))
+    end)
+    if ok and result then return result end
+    warn("[BloxStrike] Save file corrupted, using defaults.")
+    return nil
+end
+
+-- Apply saved values to variables BEFORE the GUI reads them
+local saved = loadSettings()
+if saved then
+    scriptRunning      = saved.scriptRunning      or false
+    SkinChangerEnabled = saved.SkinChangerEnabled or false
+    selectedKnife      = saved.selectedKnife      or "Butterfly Knife"
+    SelectedSkins      = saved.SelectedSkins      or {}
+end
+--// ═════════════════════════════════════════════════════════════
+
+--// ─────────────────────────────────────────────────────────────
+--// GUI HELPERS
+--// ─────────────────────────────────────────────────────────────
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name           = "BloxStrikeGUI"
+ScreenGui.ResetOnSpawn   = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent         = player:WaitForChild("PlayerGui")
+
+local function corner(p, r)
+    local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r or 8); c.Parent=p
+end
+local function stroke(p, col, thick)
+    local s=Instance.new("UIStroke"); s.Color=col or CFG.BG5
+    s.Thickness=thick or 1; s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; s.Parent=p
+end
+local function tw(obj, props, t, style, dir)
+    return TweenService:Create(obj, TweenInfo.new(t or 0.18, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+end
+local function mLabel(parent, txt, sz, col, font, xa)
+    local l=Instance.new("TextLabel"); l.BackgroundTransparency=1
+    l.Text=txt or ""; l.TextSize=sz or 12
+    l.TextColor3=col or CFG.TEXT1; l.Font=font or Enum.Font.GothamSemibold
+    l.TextXAlignment=xa or Enum.TextXAlignment.Left; l.Parent=parent; return l
+end
+local function mPad(p, l, r, t, b)
+    local pd=Instance.new("UIPadding")
+    pd.PaddingLeft=UDim.new(0,l or 0); pd.PaddingRight=UDim.new(0,r or 0)
+    pd.PaddingTop=UDim.new(0,t or 0);  pd.PaddingBottom=UDim.new(0,b or 0)
+    pd.Parent=p
+end
+local function hov(btn, base)
+    btn.MouseEnter:Connect(function() tw(btn,{BackgroundColor3=base:Lerp(Color3.new(1,1,1),0.14)},0.1):Play() end)
+    btn.MouseLeave:Connect(function() tw(btn,{BackgroundColor3=base},0.1):Play() end)
+end
+
+--// ─────────────────────────────────────────────────────────────
+--// MAIN FRAME
+--// ─────────────────────────────────────────────────────────────
+local Main = Instance.new("Frame")
+Main.Size             = UDim2.new(0,CFG.GUI_W,0,CFG.GUI_H)
+Main.Position         = UDim2.new(0.5,-CFG.GUI_W/2,0.5,-CFG.GUI_H/2)
+Main.BackgroundColor3 = CFG.BG1
+Main.BorderSizePixel  = 0
+Main.ClipsDescendants = true
+Main.Parent           = ScreenGui
+corner(Main,14)
+stroke(Main,Color3.fromRGB(38,38,68),1.5)
+
+do
+    local g=Instance.new("UIGradient")
+    g.Color=ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(18,18,32)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(6,6,12)),
+    })
+    g.Rotation=130; g.Parent=Main
+end
+
+--// ── HEADER ──────────────────────────────────────────────────
+local Header=Instance.new("Frame")
+Header.Size=UDim2.new(1,0,0,54)
+Header.BackgroundColor3=CFG.BG2
+Header.BorderSizePixel=0
+Header.Parent=Main
+corner(Header,14)
+
+local hFix=Instance.new("Frame")
+hFix.Size=UDim2.new(1,0,0.5,0); hFix.Position=UDim2.new(0,0,0.5,0)
+hFix.BackgroundColor3=CFG.BG2; hFix.BorderSizePixel=0; hFix.Parent=Header
+
+local aGlow=Instance.new("Frame")
+aGlow.Size=UDim2.new(0,18,0,30); aGlow.Position=UDim2.new(0,9,0.5,-15)
+aGlow.BackgroundColor3=CFG.ACCENT; aGlow.BackgroundTransparency=0.78
+aGlow.BorderSizePixel=0; aGlow.Parent=Header; corner(aGlow,7)
+
+local aBar=Instance.new("Frame")
+aBar.Size=UDim2.new(0,3,0,30); aBar.Position=UDim2.new(0,14,0.5,-15)
+aBar.BackgroundColor3=CFG.ACCENT; aBar.BorderSizePixel=0; aBar.Parent=Header; corner(aBar,3)
+
+local titleL=mLabel(Header,"Blox Strike",17,CFG.TEXT1,Enum.Font.GothamBold)
+titleL.Size=UDim2.new(1,-140,0,24); titleL.Position=UDim2.new(0,28,0,8)
+
+local subL=mLabel(Header,"Knife & Skin Changer  ·  v1.0",10,CFG.TEXT3,Enum.Font.Gotham)
+subL.Size=UDim2.new(1,-140,0,14); subL.Position=UDim2.new(0,28,0,32)
+
+local hintL=mLabel(Header,"[F4] Toggle",9,CFG.TEXT3,Enum.Font.Gotham,Enum.TextXAlignment.Right)
+hintL.Size=UDim2.new(0,90,0,14); hintL.Position=UDim2.new(1,-174,0,32)
+
+local function winBtn(icon,bg,xOff)
+    local b=Instance.new("TextButton")
+    b.Size=UDim2.new(0,30,0,30); b.Position=UDim2.new(1,xOff,0.5,-15)
+    b.BackgroundColor3=bg; b.Text=icon; b.TextColor3=CFG.TEXT1
+    b.TextSize=13; b.Font=Enum.Font.GothamBold; b.AutoButtonColor=false
+    b.Parent=Header; corner(b,8); hov(b,bg); return b
+end
+local MinBtn   = winBtn("–",CFG.BG5,-74)
+local CloseBtn = winBtn("✕",CFG.DANGER,-38)
+
+--// ── SIDEBAR + CONTENT SPLIT ──────────────────────────────────
+local Body=Instance.new("Frame")
+Body.Size=UDim2.new(1,-16,1,-66)
+Body.Position=UDim2.new(0,8,0,60)
+Body.BackgroundTransparency=1
+Body.Parent=Main
+
+local Sidebar=Instance.new("Frame")
+Sidebar.Size=UDim2.new(0,118,1,0)
+Sidebar.BackgroundColor3=CFG.BG2
+Sidebar.BorderSizePixel=0
+Sidebar.Parent=Body
+corner(Sidebar,10)
+stroke(Sidebar,Color3.fromRGB(32,32,55),1)
+
+local sbLayout=Instance.new("UIListLayout")
+sbLayout.Padding=UDim.new(0,4)
+sbLayout.SortOrder=Enum.SortOrder.LayoutOrder
+sbLayout.Parent=Sidebar
+mPad(Sidebar,5,5,8,8)
+
+local ContentArea=Instance.new("Frame")
+ContentArea.Size=UDim2.new(1,-128,1,0)
+ContentArea.Position=UDim2.new(0,128,0,0)
+ContentArea.BackgroundTransparency=1
+ContentArea.Parent=Body
+
+--// ── NAV BUTTON FACTORY ───────────────────────────────────────
+local navBtns = {}
+local activeTab = nil
+
+local function makeNavBtn(icon, label, order)
+    local b=Instance.new("TextButton")
+    b.Size=UDim2.new(1,0,0,42)
+    b.BackgroundColor3=CFG.BG3
+    b.Text=""
+    b.AutoButtonColor=false
+    b.LayoutOrder=order
+    b.Parent=Sidebar
+    corner(b,8)
+
+    local ic=mLabel(b,icon,18,CFG.TEXT2,Enum.Font.GothamBold,Enum.TextXAlignment.Center)
+    ic.Size=UDim2.new(1,0,0,20); ic.Position=UDim2.new(0,0,0,6)
+
+    local lb=mLabel(b,label,9,CFG.TEXT3,Enum.Font.Gotham,Enum.TextXAlignment.Center)
+    lb.Size=UDim2.new(1,0,0,13); lb.Position=UDim2.new(0,0,0,26)
+
+    local bar=Instance.new("Frame")
+    bar.Size=UDim2.new(0,3,0,24); bar.Position=UDim2.new(0,0,0.5,-12)
+    bar.BackgroundColor3=CFG.ACCENT; bar.BorderSizePixel=0
+    bar.BackgroundTransparency=1; bar.Parent=b; corner(bar,3)
+
+    navBtns[label]={btn=b, icon=ic, lbl=lb, bar=bar}
+
+    b.MouseEnter:Connect(function()
+        if activeTab~=label then tw(b,{BackgroundColor3=CFG.BG4},0.1):Play() end
+    end)
+    b.MouseLeave:Connect(function()
+        if activeTab~=label then tw(b,{BackgroundColor3=CFG.BG3},0.1):Play() end
+    end)
+    return b
+end
+
+--// ── PAGE FACTORY ─────────────────────────────────────────────
+local pages={}
+local function makePage(name)
+    local s=Instance.new("ScrollingFrame")
+    s.Name=name
+    s.Size=UDim2.new(1,0,1,0)
+    s.BackgroundTransparency=1
+    s.BorderSizePixel=0
+    s.ScrollBarThickness=3
+    s.ScrollBarImageColor3=CFG.ACCENT
+    s.CanvasSize=UDim2.new(0,0,0,0)
+    s.ScrollingDirection=Enum.ScrollingDirection.Y
+    s.Visible=false
+    s.Parent=ContentArea
+
+    local ll=Instance.new("UIListLayout")
+    ll.Padding=UDim.new(0,8)
+    ll.SortOrder=Enum.SortOrder.LayoutOrder
+    ll.Parent=s
+    mPad(s,2,8,6,10)
+
+    ll:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        s.CanvasSize=UDim2.new(0,0,0,ll.AbsoluteContentSize.Y+14)
+    end)
+    pages[name]=s
+    return s
+end
+
+--// ── SECTION LABEL ────────────────────────────────────────────
+local function makeSection(parent, title, order)
+    local f=Instance.new("Frame")
+    f.Size=UDim2.new(1,-2,0,28)
+    f.BackgroundColor3=CFG.BG3
+    f.BorderSizePixel=0
+    f.LayoutOrder=order or 0
+    f.Parent=parent
+    corner(f,7)
+
+    local bar=Instance.new("Frame")
+    bar.Size=UDim2.new(0,3,0.6,0); bar.Position=UDim2.new(0,8,0.2,0)
+    bar.BackgroundColor3=CFG.ACCENT; bar.BorderSizePixel=0
+    bar.Parent=f; corner(bar,3)
+
+    local l=mLabel(f,title,11,CFG.ACCENT,Enum.Font.GothamBold)
+    l.Size=UDim2.new(1,-20,1,0); l.Position=UDim2.new(0,20,0,0)
+end
+
+--// ── CARD ─────────────────────────────────────────────────────
+local function makeCard(parent, order)
+    local f=Instance.new("Frame")
+    f.Size=UDim2.new(1,-2,0,0)
+    f.AutomaticSize=Enum.AutomaticSize.Y
+    f.BackgroundColor3=CFG.BG3
+    f.BorderSizePixel=0
+    f.LayoutOrder=order or 0
+    f.Parent=parent
+    corner(f,9)
+    stroke(f,Color3.fromRGB(30,30,52),1)
+
+    local ll=Instance.new("UIListLayout")
+    ll.Padding=UDim.new(0,0)
+    ll.SortOrder=Enum.SortOrder.LayoutOrder
+    ll.Parent=f
+    mPad(f,0,0,0,0)
+    return f
+end
+
+--// ── TOGGLE ROW ───────────────────────────────────────────────
+local function makeToggle(parent, label, desc, defaultVal, order, callback)
+    local row=Instance.new("TextButton")
+    row.Size=UDim2.new(1,0,0,54)
+    row.BackgroundColor3=CFG.BG3
+    row.BorderSizePixel=0
+    row.LayoutOrder=order or 0
+    row.Text=""
+    row.AutoButtonColor=false
+    row.Parent=parent
+    corner(row,9)
+
+    local lbl=mLabel(row,label,12,CFG.TEXT1,Enum.Font.GothamBold)
+    lbl.Size=UDim2.new(1,-80,0,18); lbl.Position=UDim2.new(0,14,0,10)
+
+    if desc and desc~="" then
+        local dl=mLabel(row,desc,9,CFG.TEXT3,Enum.Font.Gotham)
+        dl.Size=UDim2.new(1,-80,0,13); dl.Position=UDim2.new(0,14,0,28)
+    end
+
+    local val=defaultVal or false
+
+    local pill=Instance.new("TextButton")
+    pill.Size=UDim2.new(0,44,0,24)
+    pill.Position=UDim2.new(1,-58,0.5,-12)
+    pill.BackgroundColor3=val and CFG.SUCCESS or CFG.BG5
+    pill.Text=""
+    pill.AutoButtonColor=false
+    pill.Parent=row
+    corner(pill,12)
+    stroke(pill,val and CFG.SUCCESS:Lerp(Color3.new(0,0,0),0.3) or CFG.BG4,1)
+
+    local knob=Instance.new("Frame")
+    knob.Size=UDim2.new(0,18,0,18)
+    knob.Position=UDim2.new(0,val and 22 or 4,0.5,-9)
+    knob.BackgroundColor3=CFG.TEXT1
+    knob.BorderSizePixel=0
+    knob.Parent=pill
+    corner(knob,9)
+
+    local function setState(v)
+        val=v
+        tw(pill,{BackgroundColor3=v and CFG.SUCCESS or CFG.BG5},0.15):Play()
+        tw(knob,{Position=UDim2.new(0,v and 22 or 4,0.5,-9)},0.15):Play()
+        if callback then callback(v) end
+    end
+
+    pill.MouseButton1Click:Connect(function() setState(not val) end)
+    return setState
+end
+
+--// ── DROPDOWN ROW ─────────────────────────────────────────────
+local activeDropdown = nil
+
+local function makeDropdown(parent, label, options, default, order, callback)
+    local row=Instance.new("Frame")
+    row.Size=UDim2.new(1,0,0,54)
+    row.BackgroundColor3=CFG.BG3
+    row.AutomaticSize=Enum.AutomaticSize.None
+    row.BorderSizePixel=0
+    row.LayoutOrder=order or 0
+    row.ClipsDescendants=false
+    row.ZIndex=10
+    row.Parent=parent
+    corner(row,9)
+
+    local lbl=mLabel(row,label,12,CFG.TEXT1,Enum.Font.GothamBold)
+    lbl.Size=UDim2.new(1,-170,0,18); lbl.Position=UDim2.new(0,14,0,18)
+    lbl.TextTruncate=Enum.TextTruncate.AtEnd
+
+    local currentVal=default or (options and options[1]) or "None"
+
+    local dispBtn=Instance.new("TextButton")
+    dispBtn.Size=UDim2.new(0,148,0,30)
+    dispBtn.Position=UDim2.new(1,-158,0.5,-15)
+    dispBtn.BackgroundColor3=CFG.BG4
+    dispBtn.Text=currentVal
+    dispBtn.TextColor3=CFG.TEXT1
+    dispBtn.TextSize=11
+    dispBtn.Font=Enum.Font.GothamSemibold
+    dispBtn.AutoButtonColor=false
+    dispBtn.TextTruncate=Enum.TextTruncate.AtEnd
+    dispBtn.Parent=row
+    corner(dispBtn,7)
+    stroke(dispBtn,Color3.fromRGB(45,45,72),1)
+    mPad(dispBtn,8,24,0,0)
+
+    local chev=mLabel(dispBtn,"▾",11,CFG.TEXT2,Enum.Font.GothamBold,Enum.TextXAlignment.Right)
+    chev.Size=UDim2.new(0,20,1,0); chev.Position=UDim2.new(1,-22,0,0)
+
+    local list=Instance.new("Frame")
+    list.Size=UDim2.new(0,148,0,0)
+    list.BackgroundColor3=CFG.BG2
+    list.BorderSizePixel=0
+    list.ClipsDescendants=true
+    list.ZIndex=200
+    list.Visible=false
+    list.Parent=ScreenGui
+    corner(list,8)
+    stroke(list,Color3.fromRGB(42,42,70),1.5)
+
+    local scrollFrame=Instance.new("ScrollingFrame")
+    scrollFrame.Size=UDim2.new(1,0,1,0)
+    scrollFrame.BackgroundTransparency=1
+    scrollFrame.BorderSizePixel=0
+    scrollFrame.ScrollBarThickness=3
+    scrollFrame.ScrollBarImageColor3=CFG.ACCENT
+    scrollFrame.CanvasSize=UDim2.new(0,0,0,0)
+    scrollFrame.ScrollingDirection=Enum.ScrollingDirection.Y
+    scrollFrame.ZIndex=201
+    scrollFrame.Parent=list
+
+    local listLayout=Instance.new("UIListLayout")
+    listLayout.Padding=UDim.new(0,2)
+    listLayout.SortOrder=Enum.SortOrder.LayoutOrder
+    listLayout.Parent=scrollFrame
+    mPad(scrollFrame,4,4,4,4)
+
+    listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scrollFrame.CanvasSize=UDim2.new(0,0,0,listLayout.AbsoluteContentSize.Y+8)
+    end)
+
+    local isOpen=false
+    local itemBtns={}
+
+    local function updateListPosition()
+        local abs=dispBtn.AbsolutePosition
+        local absSize=dispBtn.AbsoluteSize
+        list.Position=UDim2.new(0,abs.X,0,abs.Y+absSize.Y+4)
+        list.Size=UDim2.new(0,dispBtn.AbsoluteSize.X,0,0)
+    end
+
+    local function closeList()
+        isOpen=false
+        tw(list,{Size=UDim2.new(0,dispBtn.AbsoluteSize.X,0,0)},0.18,Enum.EasingStyle.Quad):Play()
+        task.delay(0.18,function()
+            if not isOpen then list.Visible=false end
+        end)
+        tw(chev,{Rotation=0,TextColor3=CFG.TEXT2},0.15):Play()
+        if activeDropdown==list then activeDropdown=nil end
+    end
+
+    local function buildList(opts)
+        for _,b in ipairs(itemBtns) do b:Destroy() end
+        itemBtns={}
+        for i,opt in ipairs(opts) do
+            local ib=Instance.new("TextButton")
+            ib.Size=UDim2.new(1,0,0,28)
+            ib.BackgroundColor3=opt==currentVal and CFG.BG4 or CFG.BG3
+            ib.Text=opt
+            ib.TextColor3=opt==currentVal and CFG.TEXT1 or CFG.TEXT2
+            ib.TextSize=11
+            ib.Font=Enum.Font.GothamSemibold
+            ib.AutoButtonColor=false
+            ib.LayoutOrder=i
+            ib.TextTruncate=Enum.TextTruncate.AtEnd
+            ib.ZIndex=202
+            ib.Parent=scrollFrame
+            corner(ib,6)
+            mPad(ib,8,0,0,0)
+
+            hov(ib,opt==currentVal and CFG.BG4 or CFG.BG3)
+
+            ib.MouseButton1Click:Connect(function()
+                currentVal=opt
+                dispBtn.Text=opt
+                for _,b2 in ipairs(itemBtns) do
+                    b2.BackgroundColor3=b2.Text==opt and CFG.BG4 or CFG.BG3
+                    b2.TextColor3=b2.Text==opt and CFG.TEXT1 or CFG.TEXT2
+                end
+                closeList()
+                if callback then callback(opt) end
+            end)
+            table.insert(itemBtns,ib)
+        end
+    end
+
+    buildList(options or {})
+
+    dispBtn.MouseButton1Click:Connect(function()
+        if isOpen then
+            closeList()
+        else
+            if activeDropdown and activeDropdown~=list then
+                tw(activeDropdown,{Size=UDim2.new(0,activeDropdown.AbsoluteSize.X,0,0)},0.18,Enum.EasingStyle.Quad):Play()
+                task.delay(0.18,function() activeDropdown.Visible=false end)
+                activeDropdown=nil
+            end
+
+            isOpen=true
+            activeDropdown=list
+            updateListPosition()
+            list.Visible=true
+
+            local totalH=listLayout.AbsoluteContentSize.Y+10
+            local clampedH=math.min(totalH,180)
+            tw(list,{Size=UDim2.new(0,dispBtn.AbsoluteSize.X,0,clampedH)},0.18,Enum.EasingStyle.Quad):Play()
+            tw(chev,{Rotation=180,TextColor3=CFG.ACCENT},0.15):Play()
+        end
+    end)
+
+    UserInputService.InputBegan:Connect(function(inp,gp)
+        if gp then return end
+        if isOpen and inp.UserInputType==Enum.UserInputType.MouseButton1 then
+            local mPos=UserInputService:GetMouseLocation()
+            local lPos=list.AbsolutePosition
+            local lSize=list.AbsoluteSize
+            local dPos=dispBtn.AbsolutePosition
+            local dSize=dispBtn.AbsoluteSize
+            local inList=mPos.X>=lPos.X and mPos.X<=lPos.X+lSize.X
+                      and mPos.Y>=lPos.Y and mPos.Y<=lPos.Y+lSize.Y
+            local inBtn=mPos.X>=dPos.X and mPos.X<=dPos.X+dSize.X
+                     and mPos.Y>=dPos.Y and mPos.Y<=dPos.Y+dSize.Y
+            if not inList and not inBtn then
+                closeList()
+            end
+        end
+    end)
+
+    local function setOptions(opts)
+        buildList(opts)
+        if not table.find(opts,currentVal) then
+            currentVal=opts[1] or "None"
+            dispBtn.Text=currentVal
+        end
+    end
+
+    return setOptions, function() return currentVal end
+end
+
+--// ── INFO ROW ─────────────────────────────────────────────────
+local function makeInfo(parent, lines, order)
+    local f=Instance.new("Frame")
+    f.Size=UDim2.new(1,-2,0,0)
+    f.AutomaticSize=Enum.AutomaticSize.Y
+    f.BackgroundColor3=CFG.BG3
+    f.BorderSizePixel=0
+    f.LayoutOrder=order or 0
+    f.Parent=parent
+    corner(f,9)
+    mPad(f,14,14,10,10)
+
+    local ll=Instance.new("UIListLayout")
+    ll.Padding=UDim.new(0,4); ll.SortOrder=Enum.SortOrder.LayoutOrder; ll.Parent=f
+
+    for i,line in ipairs(lines) do
+        local l=mLabel(f,line,10,CFG.TEXT2,Enum.Font.Gotham)
+        l.Size=UDim2.new(1,0,0,14); l.LayoutOrder=i
+        l.TextWrapped=true
+    end
+end
+
+--// ─────────────────────────────────────────────────────────────
+--// BUILD PAGES
+--// ─────────────────────────────────────────────────────────────
+
+-- ── Page 1: Info ─────────────────────────────────────────────
+local pageInfo = makePage("Info")
+
+makeSection(pageInfo,"About",1)
+
+local infoCard=makeCard(pageInfo,2)
+mPad(infoCard,12,12,12,12)
+do
+    local ll2=Instance.new("UIListLayout"); ll2.Padding=UDim.new(0,8); ll2.SortOrder=Enum.SortOrder.LayoutOrder; ll2.Parent=infoCard
+
+    local function infoLine(icon,txt,ord)
+        local row=Instance.new("Frame"); row.Size=UDim2.new(1,0,0,28)
+        row.BackgroundTransparency=1; row.LayoutOrder=ord; row.Parent=infoCard
+        local ic=mLabel(row,icon,13,CFG.ACCENT,Enum.Font.GothamBold,Enum.TextXAlignment.Center)
+        ic.Size=UDim2.new(0,22,1,0); ic.Position=UDim2.new(0,0,0,0)
+        local lb=mLabel(row,txt,11,CFG.TEXT2,Enum.Font.Gotham)
+        lb.Size=UDim2.new(1,-30,1,0); lb.Position=UDim2.new(0,28,0,0)
+    end
+
+    infoLine("◆","Script developed by twistedk1d",1)
+    infoLine("◆","All scripts were written manually",2)
+    infoLine("◆","Specifically for Blox Strike",3)
+    infoLine("◆","Thank you for using our script",4)
+end
+
+makeSection(pageInfo,"Controls",3)
+makeInfo(pageInfo,{
+    "F  — Inspect knife animation",
+    "LMB — Attack / swing",
+    "F4 — Toggle this GUI",
+},4)
+
+-- ── Page 2: Knife ─────────────────────────────────────────────
+local pageKnife = makePage("Knife")
+
+makeSection(pageKnife,"Custom Knife",1)
+
+local knifeCard=makeCard(pageKnife,2)
+
+-- ↓ defaultVal is now `scriptRunning` (already loaded from save file above)
+makeToggle(knifeCard,"Enable Custom Knife","Replace the default knife viewmodel",
+    scriptRunning, 1, function(v)
+        scriptRunning=v
+        if not v then removeViewmodel() end
+        saveSettings() -- ← save on change
+    end
+)
+
+do
+    local div=Instance.new("Frame"); div.Size=UDim2.new(1,-24,0,1)
+    div.Position=UDim2.new(0,12,0,0); div.BackgroundColor3=CFG.BG4
+    div.BorderSizePixel=0; div.LayoutOrder=2; div.Parent=knifeCard
+end
+
+-- ↓ default is now `selectedKnife` (already loaded from save file above)
+local _, knifeGetCurrent = makeDropdown(knifeCard,"Selected Knife",
+    {"Butterfly Knife","Karambit","M9 Bayonet","Flip Knife","Gut Knife"},
+    selectedKnife, 3, function(opt)
+        selectedKnife=opt
+        if spawned then removeViewmodel() end
+        saveSettings() -- ← save on change
+    end
+)
+
+makeSection(pageKnife,"Knife Skins",4)
+local knifeSkinCard=makeCard(pageKnife,5)
+local order=1
+for name in pairs(KNIVES) do
+    local folder=SkinsFolder:FindFirstChild(name); if not folder then continue end
+    local opts={}; for _,sk in folder:GetChildren() do table.insert(opts,sk.Name) end
+    if not SelectedSkins[name] then SelectedSkins[name]=opts[1] end
+    makeDropdown(knifeSkinCard,name,opts,
+        SelectedSkins[name], -- ← uses saved skin
+        order,function(opt)
+            SelectedSkins[name]=opt
+            for _,obj in camera:GetChildren() do
+                obj:SetAttribute("SkinApplied",nil); applyWeaponSkin(obj)
+            end
+            saveSettings() -- ← save on change
+        end
+    )
+    order+=1
+end
+
+-- ── Page 3: Gloves ───────────────────────────────────────────
+local pageGloves = makePage("Gloves")
+
+makeSection(pageGloves,"Glove Skins",1)
+local gloveCard=makeCard(pageGloves,2)
+local gorder=1
+for name in pairs(GLOVES) do
+    local folder=SkinsFolder:FindFirstChild(name); if not folder then continue end
+    local opts={}; for _,sk in folder:GetChildren() do table.insert(opts,sk.Name) end
+    if not SelectedSkins[name] then SelectedSkins[name]=opts[1] end
+    makeDropdown(gloveCard,name,opts,
+        SelectedSkins[name], -- ← uses saved skin
+        gorder,function(opt)
+            SelectedSkins[name]=opt
+            for _,obj in camera:GetChildren() do
+                obj:SetAttribute("SkinApplied",nil); applyWeaponSkin(obj)
+            end
+            saveSettings() -- ← save on change
+        end
+    )
+    gorder+=1
+end
+
+-- ── Page 4: Weapons ──────────────────────────────────────────
+local pageWeapons = makePage("Weapons")
+
+makeSection(pageWeapons,"Skin Changer",1)
+local scCard=makeCard(pageWeapons,2)
+
+-- ↓ defaultVal is now `SkinChangerEnabled` (already loaded from save file above)
+makeToggle(scCard,"Enable Skin Changer","Apply custom skins to all weapons",
+    SkinChangerEnabled, 1, function(v)
+        SkinChangerEnabled=v
+        if not v then
+            for _,obj in camera:GetChildren() do obj:SetAttribute("SkinApplied",nil) end
+        end
+        saveSettings() -- ← save on change
+    end
+)
+
+makeSection(pageWeapons,"CT Weapons",3)
+local ctCard=makeCard(pageWeapons,4)
+local cto=1
+for name in pairs(CT_ONLY) do
+    local folder=SkinsFolder:FindFirstChild(name); if not folder then continue end
+    local opts={}; for _,sk in folder:GetChildren() do table.insert(opts,sk.Name) end
+    if not SelectedSkins[name] then SelectedSkins[name]=opts[1] end
+    makeDropdown(ctCard,name,opts,
+        SelectedSkins[name], -- ← uses saved skin
+        cto,function(opt)
+            SelectedSkins[name]=opt
+            for _,obj in camera:GetChildren() do
+                obj:SetAttribute("SkinApplied",nil); applyWeaponSkin(obj)
+            end
+            saveSettings() -- ← save on change
+        end
+    )
+    cto+=1
+end
+
+makeSection(pageWeapons,"Shared Weapons",5)
+local shCard=makeCard(pageWeapons,6)
+local sho=1
+for name in pairs(SHARED) do
+    local folder=SkinsFolder:FindFirstChild(name); if not folder then continue end
+    local opts={}; for _,sk in folder:GetChildren() do table.insert(opts,sk.Name) end
+    if not SelectedSkins[name] then SelectedSkins[name]=opts[1] end
+    makeDropdown(shCard,name,opts,
+        SelectedSkins[name], -- ← uses saved skin
+        sho,function(opt)
+            SelectedSkins[name]=opt
+            for _,obj in camera:GetChildren() do
+                obj:SetAttribute("SkinApplied",nil); applyWeaponSkin(obj)
+            end
+            saveSettings() -- ← save on change
+        end
+    )
+    sho+=1
+end
+
+makeSection(pageWeapons,"Other",7)
+local otherCard=makeCard(pageWeapons,8)
+local oo=1
+for _,folder in SkinsFolder:GetChildren() do
+    local n=folder.Name
+    if not IgnoreFolders[n] and not KNIVES[n] and not GLOVES[n] and not CT_ONLY[n] and not SHARED[n] then
+        local opts={}; for _,sk in folder:GetChildren() do table.insert(opts,sk.Name) end
+        if #opts>0 then
+            if not SelectedSkins[n] then SelectedSkins[n]=opts[1] end
+            makeDropdown(otherCard,n,opts,
+                SelectedSkins[n], -- ← uses saved skin
+                oo,function(opt)
+                    SelectedSkins[n]=opt
+                    for _,obj in camera:GetChildren() do
+                        obj:SetAttribute("SkinApplied",nil); applyWeaponSkin(obj)
+                    end
+                    saveSettings() -- ← save on change
+                end
+            )
+            oo+=1
+        end
+    end
+end
+
+--// ─────────────────────────────────────────────────────────────
+--// NAV BUTTONS + TAB SWITCHING
+--// ─────────────────────────────────────────────────────────────
+local tabOrder={
+    {icon="ℹ",  label="Info",    page=pageInfo},
+    {icon="🗡",  label="Knife",   page=pageKnife},
+    {icon="🧤", label="Gloves",  page=pageGloves},
+    {icon="🔫", label="Weapons", page=pageWeapons},
+}
+
+local function setTab(label)
+    activeTab=label
+    for _, entry in ipairs(tabOrder) do
+        local nb=navBtns[entry.label]
+        if not nb then continue end
+        local isActive=(entry.label==label)
+        tw(nb.btn,{BackgroundColor3=isActive and CFG.BG4 or CFG.BG3},0.14):Play()
+        nb.icon.TextColor3=isActive and CFG.ACCENT or CFG.TEXT2
+        nb.lbl.TextColor3=isActive and CFG.TEXT1  or CFG.TEXT3
+        tw(nb.bar,{BackgroundTransparency=isActive and 0 or 1},0.14):Play()
+        entry.page.Visible=(entry.label==label)
+    end
+end
+
+for i, entry in ipairs(tabOrder) do
+    local btn=makeNavBtn(entry.icon, entry.label, i)
+    btn.MouseButton1Click:Connect(function() setTab(entry.label) end)
+end
+
+do
+    local spacer=Instance.new("Frame"); spacer.Size=UDim2.new(1,0,0,0)
+    spacer.BackgroundTransparency=1; spacer.LayoutOrder=99; spacer.Parent=Sidebar
+
+    local dotRow=Instance.new("Frame"); dotRow.Size=UDim2.new(1,0,0,28)
+    dotRow.BackgroundTransparency=1; dotRow.LayoutOrder=100; dotRow.Parent=Sidebar
+
+    local dot=Instance.new("Frame"); dot.Size=UDim2.new(0,8,0,8)
+    dot.Position=UDim2.new(0.5,-4,0.5,-4)
+    dot.BackgroundColor3=CFG.SUCCESS; dot.BorderSizePixel=0
+    dot.Parent=dotRow; corner(dot,4)
+
+    task.spawn(function()
+        while true do
+            tw(dot,{BackgroundTransparency=0.4},0.8,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut):Play()
+            task.wait(0.8)
+            tw(dot,{BackgroundTransparency=0},0.8,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut):Play()
+            task.wait(0.8)
+        end
+    end)
+end
+
+setTab("Info")
+
+--// ─────────────────────────────────────────────────────────────
+--// WINDOW CONTROLS
+--// ─────────────────────────────────────────────────────────────
+local minimized=false
+
+MinBtn.MouseButton1Click:Connect(function()
+    minimized=not minimized
+    Body.Visible=not minimized
+    tw(Main,{Size=minimized and UDim2.new(0,CFG.GUI_W,0,54) or UDim2.new(0,CFG.GUI_W,0,CFG.GUI_H)},
+        0.22,Enum.EasingStyle.Quart):Play()
+    MinBtn.Text=minimized and "+" or "–"
+end)
+
+-- ↓ saveSettings() called before destroying so nothing is lost
+CloseBtn.MouseButton1Click:Connect(function()
+    saveSettings() -- ← save on close
+    tw(Main,{Size=UDim2.new(0,CFG.GUI_W,0,0)},0.18):Play()
+    task.wait(0.2); ScreenGui:Destroy()
+end)
+
+UserInputService.InputBegan:Connect(function(inp, gp)
+    if gp then return end
+    if inp.KeyCode==CFG.TOGGLE_KEY then
+        Main.Visible=not Main.Visible
+    end
+end)
+
+--// ─────────────────────────────────────────────────────────────
+--// DRAGGING
+--// ─────────────────────────────────────────────────────────────
+do
+    local drag, dragStart, startPos
+    Header.InputBegan:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 then
+            drag=true; dragStart=inp.Position; startPos=Main.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if drag and inp.UserInputType==Enum.UserInputType.MouseMovement then
+            local d=inp.Position-dragStart
+            Main.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,
+                                    startPos.Y.Scale,startPos.Y.Offset+d.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end
+    end)
+end
+
+print("[BloxStrike GUI] Loaded — F4 to toggle")
