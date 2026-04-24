@@ -1,0 +1,787 @@
+--[[
+    ╔══════════════════════════════════════════════════════╗
+    ║            Player Hub  —  Premium GUI v2.3           ║
+    ║       Direct UIS Polling Flight Control Fix          ║
+    ╚══════════════════════════════════════════════════════╝
+]]
+
+--// Services
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local VirtualUser      = game:GetService("VirtualUser")
+local Lighting         = game:GetService("Lighting")
+
+--// Configuration
+local CONFIG = {
+    TOGGLE_KEY      = Enum.KeyCode.F4,
+
+    FLY_SPEED_DEF   = 2,
+    FLY_SPEED_MUL   = 25,
+    FLY_QE_VERTICAL = true,
+
+    WALK_SPEED_DEF  = 16,
+    JUMP_POWER_DEF  = 50,
+
+    -- Whether to lock WalkSpeed/JumpPower every frame
+    -- Set false if you want pads to temporarily override
+    LOCK_WALK_SPEED = true,
+    LOCK_JUMP_POWER = false,
+
+    FB_BRIGHTNESS   = 2,
+    FB_CLOCK        = 14,
+    FB_FOG_END      = 100000,
+    FB_AMBIENT      = Color3.fromRGB(255, 255, 255),
+
+    BG0             = Color3.fromRGB(7,   7,  13),
+    BG1             = Color3.fromRGB(12,  12, 22),
+    BG2             = Color3.fromRGB(18,  18, 32),
+    BG3             = Color3.fromRGB(25,  25, 42),
+    BG4             = Color3.fromRGB(34,  34, 55),
+    BG5             = Color3.fromRGB(44,  44, 68),
+
+    ACCENT          = Color3.fromRGB(108, 158, 255),
+    SUCCESS         = Color3.fromRGB(62,  214, 148),
+    DANGER          = Color3.fromRGB(240, 82,  82),
+
+    TEXT1           = Color3.fromRGB(232, 232, 255),
+    TEXT2           = Color3.fromRGB(148, 150, 192),
+    TEXT3           = Color3.fromRGB(78,  80,  125),
+
+    GUI_W           = 340,
+    GUI_H           = 560,
+}
+
+--// Variables
+local LP = Players.LocalPlayer
+
+local State = {
+    fly        = false,
+    infJump    = false,
+    noclip     = false,
+    fullbright = false,
+    antiAFK    = false,
+    lockSpeed  = CONFIG.LOCK_WALK_SPEED,  
+    lockJump   = CONFIG.LOCK_JUMP_POWER,  
+    flySpeed   = CONFIG.FLY_SPEED_DEF,
+    walkSpeed  = CONFIG.WALK_SPEED_DEF,
+    jumpPower  = CONFIG.JUMP_POWER_DEF,
+}
+
+local Connections = {}
+local FlyObjects  = {}
+local LightingBk  = {}
+
+--// Functions
+local function disc(key)
+    if Connections[key] then
+        pcall(function() Connections[key]:Disconnect() end)
+        Connections[key] = nil
+    end
+end
+
+local function getChar()   return LP.Character end
+local function getHumanoid()
+    local c = getChar()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+local function getHRP()
+    local c = getChar()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+-- Feature: Speed / Jump enforcement loop
+local function startStatEnforcement()
+    disc("statEnforce")
+    Connections.statEnforce = RunService.Heartbeat:Connect(function()
+        local hum = getHumanoid()
+        if not hum then return end
+
+        if State.lockSpeed and hum.WalkSpeed ~= State.walkSpeed then
+            hum.WalkSpeed = State.walkSpeed
+        end
+        if State.lockJump and hum.JumpPower ~= State.jumpPower then
+            hum.JumpPower = State.jumpPower
+        end
+    end)
+end
+
+local function applyMovementStats(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.WalkSpeed = State.walkSpeed
+        hum.JumpPower = State.jumpPower
+    end
+end
+
+-- Feature: Infinite Jump
+local function onJumpRequest()
+    if not State.infJump then return end
+    local hum = getHumanoid()
+    if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+end
+
+-- Feature: NoClip
+local function noclipStep()
+    local c = getChar(); if not c then return end
+    for _, p in ipairs(c:GetDescendants()) do
+        if p:IsA("BasePart") then p.CanCollide = false end
+    end
+end
+
+local function restoreCollision()
+    local c = getChar(); if not c then return end
+    for _, p in ipairs(c:GetDescendants()) do
+        if p:IsA("BasePart") then p.CanCollide = true end
+    end
+end
+
+local function setNoclip(enabled)
+    State.noclip = enabled
+    disc("noclip")
+    if enabled then
+        Connections.noclip = RunService.Stepped:Connect(noclipStep)
+    else
+        restoreCollision()
+    end
+end
+
+-- Feature: Fullbright
+local function setFullbright(enabled)
+    State.fullbright = enabled
+    disc("fullbright")
+    if enabled then
+        LightingBk = {
+            Brightness    = Lighting.Brightness,
+            Ambient       = Lighting.Ambient,
+            ClockTime     = Lighting.ClockTime,
+            FogEnd        = Lighting.FogEnd,
+            GlobalShadows = Lighting.GlobalShadows,
+        }
+        Connections.fullbright = RunService.RenderStepped:Connect(function()
+            Lighting.Brightness    = CONFIG.FB_BRIGHTNESS
+            Lighting.ClockTime     = CONFIG.FB_CLOCK
+            Lighting.FogEnd        = CONFIG.FB_FOG_END
+            Lighting.GlobalShadows = false
+            Lighting.Ambient       = CONFIG.FB_AMBIENT
+        end)
+    else
+        if LightingBk.Ambient then
+            Lighting.Brightness    = LightingBk.Brightness
+            Lighting.Ambient       = LightingBk.Ambient
+            Lighting.ClockTime     = LightingBk.ClockTime
+            Lighting.FogEnd        = LightingBk.FogEnd
+            Lighting.GlobalShadows = LightingBk.GlobalShadows
+        end
+    end
+end
+
+-- Feature: Anti-AFK
+local function setAntiAFK(enabled)
+    State.antiAFK = enabled
+    disc("antiAFK")
+    if enabled then
+        Connections.antiAFK = LP.Idled:Connect(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end)
+    end
+end
+
+-- Feature: Fly (FIXED: Direct Input Polling)
+local function cleanFlyObjects()
+    for _, obj in ipairs(FlyObjects) do
+        pcall(function() if obj and obj.Parent then obj:Destroy() end end)
+    end
+    FlyObjects = {}
+end
+
+local function stopFly()
+    State.fly = false
+    disc("fly")
+    cleanFlyObjects()
+    local hum = getHumanoid()
+    if hum then
+        hum.PlatformStand = false
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
+end
+
+local function startFly()
+    local tries = 0
+    repeat task.wait(0.05); tries += 1 until (getHRP() and getHumanoid()) or tries > 40
+    if not getHRP() then return end
+
+    cleanFlyObjects()
+    local hrp   = getHRP()
+    local hum   = getHumanoid()
+    local cam   = workspace.CurrentCamera
+
+    local att = Instance.new("Attachment")
+    att.Name="_FlyAtt"; att.Parent=hrp
+    table.insert(FlyObjects, att)
+
+    local lv = Instance.new("LinearVelocity")
+    lv.Attachment0=att; lv.MaxForce=math.huge
+    lv.VectorVelocity=Vector3.zero
+    lv.RelativeTo=Enum.ActuatorRelativeTo.World
+    lv.Parent=hrp
+    table.insert(FlyObjects, lv)
+
+    local ao = Instance.new("AlignOrientation")
+    ao.Attachment0=att; ao.Mode=Enum.OrientationAlignmentMode.OneAttachment
+    ao.MaxTorque=math.huge; ao.Responsiveness=50
+    ao.RigidityEnabled=true; ao.Parent=hrp
+    table.insert(FlyObjects, ao)
+
+    local ag = Instance.new("VectorForce")
+    ag.Attachment0=att
+    ag.Force=Vector3.new(0, workspace.Gravity * hrp.AssemblyMass, 0)
+    ag.RelativeTo=Enum.ActuatorRelativeTo.World
+    ag.ApplyAtCenterOfMass=true; ag.Parent=hrp
+    table.insert(FlyObjects, ag)
+
+    hum.PlatformStand = true
+    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
+
+    Connections.fly = RunService.RenderStepped:Connect(function()
+        if not State.fly or not hrp.Parent then stopFly(); return end
+        
+        -- Stop moving if player is typing in chat/UI
+        if UserInputService:GetFocusedTextBox() then
+            lv.VectorVelocity = Vector3.zero
+            return
+        end
+
+        local cf = cam.CFrame
+        local mv = Vector3.zero
+        
+        -- Direct real-time polling to prevent stuck keys
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then mv += cf.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then mv -= cf.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then mv -= cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then mv += cf.RightVector end
+        
+        if CONFIG.FLY_QE_VERTICAL then
+            if UserInputService:IsKeyDown(Enum.KeyCode.E) then mv += Vector3.yAxis end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Q) then mv -= Vector3.yAxis end
+        end
+        
+        if mv.Magnitude > 0 then mv = mv.Unit end
+        lv.VectorVelocity = mv * (State.flySpeed * CONFIG.FLY_SPEED_MUL)
+        ao.CFrame = cf
+    end)
+end
+
+local function setFly(enabled)
+    State.fly = enabled
+    if enabled then startFly() else stopFly() end
+end
+
+-- Kill Script
+local function killScript()
+    setFly(false); setNoclip(false)
+    setFullbright(false); setAntiAFK(false)
+    State.infJump   = false
+    State.lockSpeed = false
+    State.lockJump  = false
+    disc("statEnforce")
+    disc("jumpReq"); disc("charAdded")
+    local hum = getHumanoid()
+    if hum then
+        hum.WalkSpeed = CONFIG.WALK_SPEED_DEF
+        hum.JumpPower = CONFIG.JUMP_POWER_DEF
+    end
+end
+
+-- Character lifecycle
+local function onCharAdded(char)
+    char:WaitForChild("Humanoid", 10)
+    char:WaitForChild("HumanoidRootPart", 10)
+    applyMovementStats(char)
+    if State.fly then task.delay(0.25, startFly) end
+end
+
+--// Main Execution
+
+Connections.jumpReq   = UserInputService.JumpRequest:Connect(onJumpRequest)
+Connections.charAdded = LP.CharacterAdded:Connect(onCharAdded)
+if LP.Character then task.spawn(onCharAdded, LP.Character) end
+
+-- Start the stat enforcement loop immediately
+startStatEnforcement()
+
+-- GUI Construction
+local old = LP:FindFirstChild("PlayerGui")
+    and LP.PlayerGui:FindFirstChild("PlayerHubGUI")
+if old then old:Destroy() end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name           = "PlayerHubGUI"
+ScreenGui.ResetOnSpawn   = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent         = LP:WaitForChild("PlayerGui")
+
+local function corner(p, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 8); c.Parent = p
+end
+
+local function uiStroke(p, col, thick)
+    local s = Instance.new("UIStroke")
+    s.Color=col or CONFIG.BG5; s.Thickness=thick or 1
+    s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; s.Parent=p
+end
+
+local function tw(obj, props, t, style, dir)
+    return TweenService:Create(obj,
+        TweenInfo.new(t or 0.18,
+            style or Enum.EasingStyle.Quad,
+            dir   or Enum.EasingDirection.Out), props)
+end
+
+local function mLabel(parent, txt, sz, col, font, xa)
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency=1; l.Text=txt or ""
+    l.TextSize=sz or 12; l.TextColor3=col or CONFIG.TEXT1
+    l.Font=font or Enum.Font.GothamSemibold
+    l.TextXAlignment=xa or Enum.TextXAlignment.Left
+    l.Parent=parent; return l
+end
+
+local function mPad(p, l, r, t, b)
+    local pd=Instance.new("UIPadding")
+    pd.PaddingLeft=UDim.new(0,l or 0); pd.PaddingRight=UDim.new(0,r or 0)
+    pd.PaddingTop=UDim.new(0,t or 0);  pd.PaddingBottom=UDim.new(0,b or 0)
+    pd.Parent=p
+end
+
+local function hov(btn, base)
+    btn.MouseEnter:Connect(function()
+        tw(btn,{BackgroundColor3=base:Lerp(Color3.new(1,1,1),0.13)},0.1):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        tw(btn,{BackgroundColor3=base},0.1):Play()
+    end)
+end
+
+local StatusDot, StatusLbl
+local function setStatus(msg, isErr)
+    if not StatusLbl then return end
+    StatusLbl.Text             = msg
+    StatusDot.BackgroundColor3 = isErr and CONFIG.DANGER or CONFIG.SUCCESS
+end
+
+local Main = Instance.new("Frame")
+Main.Name                   = "Main"
+Main.Size                   = UDim2.new(0, CONFIG.GUI_W, 0, 0)
+Main.Position               = UDim2.new(0.5,-CONFIG.GUI_W/2, 0.5,-CONFIG.GUI_H/2)
+Main.BackgroundColor3       = CONFIG.BG1
+Main.BackgroundTransparency = 1
+Main.BorderSizePixel        = 0
+Main.ClipsDescendants       = true
+Main.Parent                 = ScreenGui
+corner(Main, 14)
+
+do
+    local g=Instance.new("UIGradient")
+    g.Color=ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(18,18,32)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(7,7,13)),
+    })
+    g.Rotation=125; g.Parent=Main
+
+    local ps=Instance.new("UIStroke"); ps.Thickness=1.5; ps.Parent=Main
+    local pg=Instance.new("UIGradient")
+    pg.Color=ColorSequence.new({
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(108,80,255)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(55,155,255)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(80,70,220)),
+    })
+    pg.Rotation=135; pg.Parent=ps
+end
+
+local Header=Instance.new("Frame")
+Header.Size=UDim2.new(1,0,0,52); Header.BackgroundColor3=CONFIG.BG2
+Header.BorderSizePixel=0; Header.Parent=Main; corner(Header,14)
+
+local hFix=Instance.new("Frame"); hFix.Size=UDim2.new(1,0,0.5,0)
+hFix.Position=UDim2.new(0,0,0.5,0); hFix.BackgroundColor3=CONFIG.BG2
+hFix.BorderSizePixel=0; hFix.Parent=Header
+
+do
+    local g=Instance.new("Frame"); g.Size=UDim2.new(0,18,0,30)
+    g.Position=UDim2.new(0,9,0.5,-15); g.BackgroundColor3=CONFIG.ACCENT
+    g.BackgroundTransparency=0.80; g.BorderSizePixel=0; g.Parent=Header; corner(g,7)
+    local b=Instance.new("Frame"); b.Size=UDim2.new(0,3,0,30)
+    b.Position=UDim2.new(0,14,0.5,-15); b.BackgroundColor3=CONFIG.ACCENT
+    b.BorderSizePixel=0; b.Parent=Header; corner(b,3)
+end
+
+local titleL=mLabel(Header,"Player Hub",16,CONFIG.TEXT1,Enum.Font.GothamBold)
+titleL.Size=UDim2.new(1,-130,0,22); titleL.Position=UDim2.new(0,28,0,8)
+local subL=mLabel(Header,"Movement & Utility  ·  v2.3",10,CONFIG.TEXT3,Enum.Font.Gotham)
+subL.Size=UDim2.new(1,-130,0,14); subL.Position=UDim2.new(0,28,0,31)
+local hintL=mLabel(Header,"[F4] Toggle",9,CONFIG.TEXT3,Enum.Font.Gotham,Enum.TextXAlignment.Right)
+hintL.Size=UDim2.new(0,80,0,14); hintL.Position=UDim2.new(1,-92,0,31)
+
+local function winBtn(icon,bg,xOff)
+    local b=Instance.new("TextButton")
+    b.Size=UDim2.new(0,28,0,28); b.Position=UDim2.new(1,xOff,0.5,-14)
+    b.BackgroundColor3=bg; b.Text=icon; b.TextColor3=CONFIG.TEXT1
+    b.TextSize=13; b.Font=Enum.Font.GothamBold; b.AutoButtonColor=false
+    b.Parent=Header; corner(b,7); hov(b,bg); return b
+end
+local MinBtn   = winBtn("–",CONFIG.BG5,-68)
+local CloseBtn = winBtn("✕",CONFIG.DANGER,-34)
+
+local acLine=Instance.new("Frame")
+acLine.Size=UDim2.new(1,0,0,2); acLine.Position=UDim2.new(0,0,0,52)
+acLine.BackgroundColor3=Color3.new(1,1,1); acLine.BorderSizePixel=0; acLine.Parent=Main
+do
+    local g=Instance.new("UIGradient")
+    g.Color=ColorSequence.new({
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(108,80,255)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(55,155,255)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(80,70,220)),
+    })
+    g.Parent=acLine
+end
+
+local Scroll=Instance.new("ScrollingFrame")
+Scroll.Size=UDim2.new(1,0,1,-(52+4+36)); Scroll.Position=UDim2.new(0,0,0,56)
+Scroll.BackgroundTransparency=1; Scroll.BorderSizePixel=0
+Scroll.ScrollBarThickness=3; Scroll.ScrollBarImageColor3=CONFIG.ACCENT
+Scroll.CanvasSize=UDim2.new(0,0,0,0); Scroll.ScrollingDirection=Enum.ScrollingDirection.Y
+Scroll.Parent=Main
+
+local scrollLL=Instance.new("UIListLayout")
+scrollLL.Padding=UDim.new(0,7); scrollLL.SortOrder=Enum.SortOrder.LayoutOrder
+scrollLL.Parent=Scroll
+mPad(Scroll,10,10,8,8)
+
+scrollLL:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    Scroll.CanvasSize=UDim2.new(0,0,0,scrollLL.AbsoluteContentSize.Y+14)
+end)
+
+local rowOrder=0
+local function nextOrd() rowOrder+=1; return rowOrder end
+
+local function makeSection(title)
+    local f=Instance.new("Frame"); f.Size=UDim2.new(1,-2,0,26)
+    f.BackgroundColor3=CONFIG.BG3; f.BorderSizePixel=0
+    f.LayoutOrder=nextOrd(); f.Parent=Scroll; corner(f,7)
+    local bar=Instance.new("Frame"); bar.Size=UDim2.new(0,3,0,14)
+    bar.Position=UDim2.new(0,9,0.5,-7); bar.BackgroundColor3=CONFIG.ACCENT
+    bar.BorderSizePixel=0; bar.Parent=f; corner(bar,3)
+    local l=mLabel(f,title,10,CONFIG.ACCENT,Enum.Font.GothamBold)
+    l.Size=UDim2.new(1,-22,1,0); l.Position=UDim2.new(0,20,0,0)
+end
+
+local function makeDivider()
+    local d=Instance.new("Frame"); d.Size=UDim2.new(1,-4,0,1)
+    d.BackgroundColor3=Color3.fromRGB(22,22,42); d.BorderSizePixel=0
+    d.LayoutOrder=nextOrd(); d.Parent=Scroll
+end
+
+local function makeToggle(label, desc, initVal, callback)
+    local row=Instance.new("TextButton")
+    row.Size=UDim2.new(1,-2,0,desc~="" and 52 or 42)
+    row.BackgroundColor3=CONFIG.BG3; row.Text=""
+    row.AutoButtonColor=false; row.BorderSizePixel=0
+    row.LayoutOrder=nextOrd(); row.Parent=Scroll
+    corner(row,9); uiStroke(row,Color3.fromRGB(28,28,50),1)
+
+    row.MouseEnter:Connect(function()
+        tw(row,{BackgroundColor3=CONFIG.BG3:Lerp(Color3.new(1,1,1),0.04)},0.1):Play()
+    end)
+    row.MouseLeave:Connect(function()
+        tw(row,{BackgroundColor3=CONFIG.BG3},0.1):Play()
+    end)
+
+    local lbl=mLabel(row,label,12,CONFIG.TEXT1,Enum.Font.GothamBold)
+    lbl.Size=UDim2.new(1,-74,0,18)
+    lbl.Position=UDim2.new(0,12,0,desc~="" and 9 or 12)
+
+    if desc and desc~="" then
+        local dl=mLabel(row,desc,9,CONFIG.TEXT3,Enum.Font.Gotham)
+        dl.Size=UDim2.new(1,-74,0,13); dl.Position=UDim2.new(0,12,0,28)
+    end
+
+    local val=initVal
+
+    local pill=Instance.new("TextButton")
+    pill.Size=UDim2.new(0,46,0,24); pill.Position=UDim2.new(1,-56,0.5,-12)
+    pill.BackgroundColor3=val and CONFIG.SUCCESS or CONFIG.BG5
+    pill.Text=""; pill.AutoButtonColor=false; pill.Parent=row; corner(pill,12)
+
+    local knob=Instance.new("Frame"); knob.Size=UDim2.new(0,18,0,18)
+    knob.Position=UDim2.new(0,val and 24 or 4,0.5,-9)
+    knob.BackgroundColor3=CONFIG.TEXT1; knob.BorderSizePixel=0
+    knob.Parent=pill; corner(knob,9)
+
+    local function setState(v)
+        val=v
+        tw(pill,{BackgroundColor3=v and CONFIG.SUCCESS or CONFIG.BG5},0.15):Play()
+        tw(knob,{Position=UDim2.new(0,v and 24 or 4,0.5,-9)},0.15):Play()
+        if callback then callback(v) end
+    end
+
+    local pillClicked=false
+    pill.MouseButton1Click:Connect(function()
+        pillClicked=true; setState(not val)
+        task.defer(function() pillClicked=false end)
+    end)
+    row.MouseButton1Click:Connect(function()
+        if pillClicked then return end
+        setState(not val)
+    end)
+
+    return setState
+end
+
+local function makeSlider(label, minV, maxV, defVal, suffix, callback)
+    local row=Instance.new("Frame"); row.Size=UDim2.new(1,-2,0,62)
+    row.BackgroundColor3=CONFIG.BG3; row.BorderSizePixel=0
+    row.LayoutOrder=nextOrd(); row.Parent=Scroll; corner(row,9)
+    uiStroke(row,Color3.fromRGB(28,28,50),1)
+
+    local lbl=mLabel(row,label,12,CONFIG.TEXT1,Enum.Font.GothamBold)
+    lbl.Size=UDim2.new(1,-82,0,16); lbl.Position=UDim2.new(0,12,0,9)
+
+    local valLbl=mLabel(row,tostring(defVal)..(suffix or ""),11,CONFIG.ACCENT,
+        Enum.Font.GothamBold,Enum.TextXAlignment.Right)
+    valLbl.Size=UDim2.new(0,72,0,16); valLbl.Position=UDim2.new(1,-84,0,9)
+
+    local track=Instance.new("Frame"); track.Size=UDim2.new(1,-24,0,6)
+    track.Position=UDim2.new(0,12,0,38); track.BackgroundColor3=CONFIG.BG5
+    track.BorderSizePixel=0; track.Parent=row; corner(track,3)
+
+    local fill=Instance.new("Frame"); fill.Size=UDim2.new(0,0,1,0)
+    fill.BackgroundColor3=CONFIG.ACCENT; fill.BorderSizePixel=0
+    fill.Parent=track; corner(fill,3)
+
+    local knob=Instance.new("TextButton"); knob.Size=UDim2.new(0,16,0,16)
+    knob.AnchorPoint=Vector2.new(0.5,0.5); knob.Position=UDim2.new(0,0,0.5,0)
+    knob.BackgroundColor3=CONFIG.TEXT1; knob.Text=""
+    knob.AutoButtonColor=false; knob.BorderSizePixel=0
+    knob.ZIndex=3; knob.Parent=track; corner(knob,8)
+
+    local curVal=defVal
+    local isDrag=false
+
+    local function updateVisual(v)
+        local pct=(v-minV)/(maxV-minV)
+        fill.Size=UDim2.new(pct,0,1,0)
+        knob.Position=UDim2.new(pct,0,0.5,0)
+        valLbl.Text=tostring(v)..(suffix or "")
+    end
+    updateVisual(defVal)
+
+    local function screenXToVal(absX)
+        local tPos=track.AbsolutePosition.X
+        local tW=track.AbsoluteSize.X
+        local pct=math.clamp((absX-tPos)/tW,0,1)
+        return math.floor(minV+pct*(maxV-minV))
+    end
+
+    local function applyVal(v)
+        v=math.clamp(math.floor(v),minV,maxV)
+        curVal=v; updateVisual(v)
+        if callback then callback(v) end
+    end
+
+    knob.MouseButton1Down:Connect(function() isDrag=true end)
+    track.InputBegan:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 then
+            isDrag=true; applyVal(screenXToVal(inp.Position.X))
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if isDrag and inp.UserInputType==Enum.UserInputType.MouseMovement then
+            applyVal(screenXToVal(inp.Position.X))
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 then isDrag=false end
+    end)
+
+    return function(v) applyVal(v) end
+end
+
+local function makeDangerBtn(label, desc, callback)
+    local row=Instance.new("TextButton")
+    row.Size=UDim2.new(1,-2,0,desc~="" and 46 or 38)
+    row.BackgroundColor3=Color3.fromRGB(38,14,14); row.Text=""
+    row.AutoButtonColor=false; row.BorderSizePixel=0
+    row.LayoutOrder=nextOrd(); row.Parent=Scroll; corner(row,9)
+    uiStroke(row,CONFIG.DANGER,1)
+
+    local lbl=mLabel(row,label,12,CONFIG.DANGER,Enum.Font.GothamBold)
+    lbl.Size=UDim2.new(1,-52,0,18)
+    lbl.Position=UDim2.new(0,12,0,desc~="" and 8 or 10)
+    if desc and desc~="" then
+        local dl=mLabel(row,desc,9,Color3.fromRGB(160,70,70),Enum.Font.Gotham)
+        dl.Size=UDim2.new(1,-52,0,13); dl.Position=UDim2.new(0,12,0,26)
+    end
+
+    local icon=mLabel(row,"✕",15,CONFIG.DANGER,Enum.Font.GothamBold,Enum.TextXAlignment.Center)
+    icon.Size=UDim2.new(0,30,1,0); icon.Position=UDim2.new(1,-42,0,0)
+
+    row.MouseEnter:Connect(function()
+        tw(row,{BackgroundColor3=Color3.fromRGB(55,16,16)},0.1):Play()
+    end)
+    row.MouseLeave:Connect(function()
+        tw(row,{BackgroundColor3=Color3.fromRGB(38,14,14)},0.1):Play()
+    end)
+    row.MouseButton1Click:Connect(function()
+        if callback then callback() end
+    end)
+end
+
+local SBar=Instance.new("Frame")
+SBar.Size=UDim2.new(1,-20,0,28); SBar.Position=UDim2.new(0,10,1,-32)
+SBar.BackgroundColor3=CONFIG.BG3; SBar.BorderSizePixel=0; SBar.Parent=Main
+corner(SBar,8); uiStroke(SBar,Color3.fromRGB(28,28,52),1)
+
+StatusDot=Instance.new("Frame"); StatusDot.Size=UDim2.new(0,7,0,7)
+StatusDot.Position=UDim2.new(0,9,0.5,-3.5)
+StatusDot.BackgroundColor3=CONFIG.SUCCESS; StatusDot.BorderSizePixel=0
+StatusDot.Parent=SBar; corner(StatusDot,4)
+
+StatusLbl=mLabel(SBar,"Ready",10,CONFIG.TEXT2,Enum.Font.Gotham)
+StatusLbl.Size=UDim2.new(1,-26,1,0); StatusLbl.Position=UDim2.new(0,22,0,0)
+
+task.spawn(function()
+    while StatusDot and StatusDot.Parent do
+        tw(StatusDot,{BackgroundTransparency=0.6},0.7,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut):Play()
+        task.wait(0.7)
+        tw(StatusDot,{BackgroundTransparency=0},0.7,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut):Play()
+        task.wait(0.7)
+    end
+end)
+
+makeSection("MOVEMENT")
+
+makeToggle("Infinite Jump","Re-jump mid-air as many times as you want",false,function(v)
+    State.infJump=v
+    setStatus(v and "Infinite Jump ON" or "Infinite Jump OFF")
+end)
+
+makeToggle("Fly","WASD to move · Q / E for altitude",false,function(v)
+    setFly(v)
+    setStatus(v and "Fly enabled — WASD + Q/E" or "Fly disabled")
+end)
+
+makeSlider("Fly Speed",1,10,CONFIG.FLY_SPEED_DEF,"",function(v)
+    State.flySpeed=v
+    setStatus("Fly speed → "..v)
+end)
+
+makeSlider("Walk Speed",16,500,CONFIG.WALK_SPEED_DEF," sp",function(v)
+    State.walkSpeed=v
+    local hum=getHumanoid(); if hum then hum.WalkSpeed=v end
+    setStatus("Walk speed locked → "..v)
+end)
+
+makeSlider("Jump Power",50,500,CONFIG.JUMP_POWER_DEF," pw",function(v)
+    State.jumpPower=v
+    local hum=getHumanoid(); if hum then hum.JumpPower=v end
+    setStatus("Jump power → "..v)
+end)
+
+makeDivider()
+
+makeSection("SPEED LOCK")
+
+makeToggle("Lock Walk Speed","Prevent movement pads from resetting your speed",
+    CONFIG.LOCK_WALK_SPEED, function(v)
+        State.lockSpeed=v
+        setStatus(v and "Walk speed locked — pads ignored"
+                    or  "Walk speed unlocked — pads active")
+    end)
+
+makeToggle("Lock Jump Power","Prevent jump pads from resetting your jump",
+    CONFIG.LOCK_JUMP_POWER, function(v)
+        State.lockJump=v
+        setStatus(v and "Jump power locked" or "Jump power unlocked")
+    end)
+
+makeDivider()
+
+makeSection("WORLD")
+
+makeToggle("NoClip","Phase through all walls and parts",false,function(v)
+    setNoclip(v); setStatus(v and "NoClip ON" or "NoClip OFF")
+end)
+
+makeToggle("Fullbright","Max ambient light · remove fog",false,function(v)
+    setFullbright(v); setStatus(v and "Fullbright ON" or "Fullbright OFF")
+end)
+
+makeDivider()
+
+makeSection("MISC")
+
+makeToggle("Anti-AFK","Prevent idle kick via virtual input",false,function(v)
+    setAntiAFK(v); setStatus(v and "Anti-AFK ON" or "Anti-AFK OFF")
+end)
+
+makeDivider()
+
+makeSection("SETTINGS")
+
+makeDangerBtn("Kill Script","Stop all features and destroy GUI",function()
+    killScript()
+    tw(Main,{Size=UDim2.new(0,CONFIG.GUI_W,0,0)},0.18):Play()
+    task.wait(0.2); ScreenGui:Destroy()
+end)
+
+local minimized=false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized=not minimized
+    Scroll.Visible=not minimized; SBar.Visible=not minimized
+    tw(Main,{Size=UDim2.new(0,CONFIG.GUI_W,0,minimized and 52 or CONFIG.GUI_H)},
+        0.22,Enum.EasingStyle.Quart):Play()
+    MinBtn.Text=minimized and "+" or "–"
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    killScript()
+    tw(Main,{Size=UDim2.new(0,CONFIG.GUI_W,0,0)},0.18):Play()
+    task.wait(0.2); ScreenGui:Destroy()
+end)
+
+UserInputService.InputBegan:Connect(function(inp,gp)
+    if gp then return end
+    if inp.KeyCode==CONFIG.TOGGLE_KEY then Main.Visible=not Main.Visible end
+end)
+
+do
+    local drag,dStart,sPos
+    Header.InputBegan:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 then
+            drag=true; dStart=inp.Position; sPos=Main.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if drag and inp.UserInputType==Enum.UserInputType.MouseMovement then
+            local d=inp.Position-dStart
+            Main.Position=UDim2.new(sPos.X.Scale,sPos.X.Offset+d.X,
+                                    sPos.Y.Scale,sPos.Y.Offset+d.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end
+    end)
+end
+
+tw(Main,
+    {Size=UDim2.new(0,CONFIG.GUI_W,0,CONFIG.GUI_H), BackgroundTransparency=0},
+    0.35,Enum.EasingStyle.Back,Enum.EasingDirection.Out
+):Play()
+
+setStatus("All systems ready")
+print("[PlayerHub v2.3] Loaded — F4 to toggle")
