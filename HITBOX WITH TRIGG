@@ -295,16 +295,16 @@ RunService.RenderStepped:Connect(function()
     end
 
     local now = tick()
-    if now - lastShotTime < 0.015 then return end
+    if now - lastShotTime < 0.05 then return end
 
-    local camera = workspace.CurrentCamera
-    if not camera then return end
+    local mouse = player:GetMouse()
+    local unitRay = mouse.UnitRay
 
     local filterList = {}
     if player.Character then table.insert(filterList, player.Character) end
     triggerRayParams.FilterDescendantsInstances = filterList
 
-    local ray = workspace:Raycast(camera.CFrame.Position, camera.CFrame.LookVector * 1000, triggerRayParams)
+    local ray = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, triggerRayParams)
     if not ray then return end
 
     local hitPart = ray.Instance
@@ -315,13 +315,14 @@ RunService.RenderStepped:Connect(function()
             
             lastShotTime = now
             if mouse1click then
-                mouse1click()
+                -- Spawn on a new thread so it never lags your game frames
+                task.spawn(mouse1click)
             else
-                local vim = game:GetService("VirtualInputManager")
-                local vp = camera.ViewportSize
-                vim:SendMouseButtonEvent(vp.X / 2, vp.Y / 2, 0, true, game, 1)
-                task.delay(0.02, function()
-                    vim:SendMouseButtonEvent(vp.X / 2, vp.Y / 2, 0, false, game, 1)
+                task.spawn(function()
+                    local vim = game:GetService("VirtualInputManager")
+                    vim:SendMouseButtonEvent(mouse.X, mouse.Y, 0, true, game, 1)
+                    task.wait(0.02)
+                    vim:SendMouseButtonEvent(mouse.X, mouse.Y, 0, false, game, 1)
                 end)
             end
         end
