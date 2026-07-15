@@ -1,0 +1,1158 @@
+--[[
+    ██╗  ██╗██╗████████╗██████╗  ██████╗ ██╗  ██╗
+    ██║  ██║██║╚══██╔══╝██╔══██╗██╔═══██╗╚██╗██╔╝
+    ███████║██║   ██║   ██████╔╝██║   ██║ ╚███╔╝ 
+    ██╔══██║██║   ██║   ██╔══██╗██║   ██║ ██╔██╗ 
+    ██║  ██║██║   ██║   ██████╔╝╚██████╔╝██╔╝ ██╗
+    ╚═╝  ╚═╝╚═╝   ╚═╝   ╚═════╝  ╚═════╝ ╚═╝  ╚═╝
+    Full-Body Hitbox Visualizer v5.0
+    Reforged Raycasting Engine — TriggerBot Included
+]]
+
+--// Services (cached once at load, never re-fetched)
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui          = game:GetService("CoreGui")
+
+--// Configuration
+local Config = {
+    Enabled          = true,
+    ShowThroughWalls = true,
+    DynamicColor     = true,
+    TriggerBot       = false,
+    TriggerMode      = 1,        -- 1=Always, 2=Hold RMB, 3=Tracking
+    TeamCheck        = false,
+
+    RenderDistance   = 1000,
+
+    ShowHead         = true,
+    ShowTorso        = true,
+    ShowArms         = true,
+    ShowLegs         = true,
+
+    ColorVisible     = Color3.fromRGB(255, 40, 40),
+    ColorHidden      = Color3.fromRGB(40, 220, 80),
+    Transparency     = 0.5,
+    OutlineTransp    = 0.1,
+
+    HeadParts  = { "Head" },
+    TorsoParts = { "Torso", "UpperTorso", "LowerTorso" },
+    ArmParts   = { "Left Arm", "Right Arm", "LeftUpperArm", "LeftLowerArm", "LeftHand",
+                   "RightUpperArm", "RightLowerArm", "RightHand" },
+    LegParts   = { "Left Leg", "Right Leg", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+                   "RightUpperLeg", "RightLowerLeg", "RightFoot" },
+}
+
+-- Raycast engine tuning — all the knobs in one place
+local RayConfig = {
+    MaxPierceDepth        = 8,     -- How many filtered objects to punch through
+    FallbackRayCount      = 2,     -- Extra offset rays when primary is blocked
+    PartSizeOffset        = 0.3,   -- Fraction of part size for offset ray targets
+    TransparencyThreshold = 0.75,  -- Only pierce parts THIS transparent or higher
+    VisCacheTTL           = 0.08,  -- Visibility cache lifetime in seconds
+    VisCacheMaxSize       = 512,   -- Hard cap before cache flush
+    TriggerMaxPierce      = 5,     -- Pierce depth for trigger bot specifically
+    TriggerFireDelay      = 0.035, -- Minimum seconds between trigger bot shots
+}
+
+--// Variables
+local player = Players.LocalPlayer
+local VIZ_TAG = "HitboxViz_v5"
+local trackedState = {}
+local trackedPlayerCount = 0  -- Maintained incrementally, no per-frame counting loop
+
+--=============================================================================
+-- SECTION 1: MEMORY POOLS & CACHES
+-- Pre-allocated structures. Zero per-frame table creation in hot paths.
+--=============================================================================
+
+-- LoS raycast params (dedicated instance, never shared with trigger)
+local losRayParams = RaycastParams.new()
+losRayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+-- Ignore list pool: indexed writes + size counter instead of table.insert
+-- Objects pierced during one limb stay in the pool for subsequent limbs
+-- of the same player (intentional: avoids re-piercing the same object)
+local ignorePool = table.create(64)
+local ignorePoolSize = 0
+
+local function poolClear()
+    table.clear(ignorePool)
+    ignorePoolSize = 0
+end
+
+local function poolAdd(obj)
+    ignorePoolSize += 1
+    ignorePool[ignorePoolSize] = obj
+end
+
+-- Trigger bot has its own pool to avoid conflicts with LoS updates
+local triggerRayParams = RaycastParams.new()
+triggerRayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local triggerIgnorePool = table.create(32)
+local triggerIgnoreSize = 0
+
+local function triggerPoolClear()
+    table.clear(triggerIgnorePool)
+    triggerIgnoreSize = 0
+end
+
+local function triggerPoolAdd(obj)
+    triggerIgnoreSize += 1
+    triggerIgnorePool[triggerIgnoreSize] = obj
+end
+
+-- Visibility cache: two parallel flat tables so we don't allocate a {v,t}
+-- wrapper table for every single cached entry
+local visCacheResult = {}  -- [BasePart] -> boolean
+local visCacheTime   = {}  -- [BasePart] -> number (tick)
+local visCacheCount  = 0
+
+local function visCacheGet(part)
+    local t = visCacheTime[part]
+    if t and (tick() - t) < RayConfig.VisCacheTTL then
+        return visCacheResult[part], true
+    end
+    return nil, false
+end
+
+local function visCacheSet(part, visible)
+    if not visCacheTime[part] then
+        visCacheCount += 1
+    end
+    visCacheResult[part] = visible
+    visCacheTime[part] = tick()
+end
+
+local function visCacheFlush()
+    table.clear(visCacheResult)
+    table.clear(visCacheTime)
+    visCacheCount = 0
+end
+
+-- Team lookup cache: avoid repeated workspace traversal for team folder names
+local teamCache     = {}
+local teamCacheTick = 0
+
+--=============================================================================
+-- SECTION 2: SMART PIERCE FILTER
+--
+-- Philosophy: ONLY pierce objects we are CERTAIN are not real walls.
+-- Ambiguous geometry (semi-transparent MeshParts, thin walls, CSG with
+-- slight transparency) is treated as solid. The multi-ray fallback in
+-- Section 3 handles edge cases geometrically instead of guessing.
+--
+-- Three confidence tiers:
+--   Tier 1 — Engine facts: CanCollide, Transparency ≥ 0.9, named capsules
+--   Tier 2 — Structural context: Accessories, characters, effect folders
+--   Tier 3 — Conservative heuristic: Transparency ≥ 0.75 (tunable)
+--=============================================================================
+
+-- O(1) name lookup for known invisible collision parts
+local ALWAYS_PIERCE_NAMES = {
+    HumanoidRootPart = true,   -- Invisible collision capsule, never rendered
+    Handle           = true,   -- Accessory/Tool mesh handle (sometimes re-parented)
+}
+
+-- Parent folder names that contain non-gameplay objects (effects, projectiles, etc.)
+local PIERCE_PARENT_NAMES = {
+    ignore      = true,
+    debris      = true,
+    effects     = true,
+    particles   = true,
+    bullets     = true,
+    projectiles = true,
+    sounds      = true,
+    fx          = true,
+    vfx         = true,
+    rays        = true,
+}
+
+local function shouldPierceHit(hitPart)
+    --=================================================================
+    -- TIER 1: ENGINE FACTS
+    -- These are objectively not walls. Zero ambiguity.
+    --=================================================================
+
+    -- If the engine itself won't collide with it, it's not an obstacle.
+    -- Triggers, zones, kill bricks, non-solid decorations.
+    if not hitPart.CanCollide then
+        return true
+    end
+
+    -- Effectively invisible parts (Transparency ≥ 0.9).
+    -- At this level the player literally cannot see the object.
+    -- This is a hard threshold that won't catch glass/tinted walls (0.3–0.5).
+    if hitPart.Transparency >= 0.9 then
+        return true
+    end
+
+    -- Named invisible collision geometry (HumanoidRootPart, Handle)
+    if ALWAYS_PIERCE_NAMES[hitPart.Name] then
+        return true
+    end
+
+    --=================================================================
+    -- TIER 2: STRUCTURAL CONTEXT
+    -- The part itself might look solid, but its parent/context tells us
+    -- it's not map geometry.
+    --=================================================================
+
+    local parent = hitPart.Parent
+    if parent then
+        -- Accessories (hats, hair, back items) and Tools
+        -- Their Handle parts often have CanCollide=true but are worn items,
+        -- not map structures.
+        if parent:IsA("Accessory") or parent:IsA("Tool") or parent:IsA("BackpackItem") then
+            return true
+        end
+
+        -- Another player's body parts: characters standing between us and
+        -- the target are not walls. We check for Humanoid as the definitive
+        -- marker of a character model.
+        if parent:IsA("Model") and parent:FindFirstChildOfClass("Humanoid") then
+            return true
+        end
+
+        -- Known container folders for transient/non-structural objects
+        local pName = parent.Name:lower()
+        if PIERCE_PARENT_NAMES[pName] then
+            return true
+        end
+    end
+
+    -- ForceField: visual shield effect, not physical geometry
+    if hitPart:FindFirstChildOfClass("ForceField") then
+        return true
+    end
+    if parent and parent:FindFirstChildOfClass("ForceField") then
+        return true
+    end
+
+    --=================================================================
+    -- TIER 3: CONSERVATIVE HEURISTIC
+    -- Only applies to parts that passed Tier 1 and 2 (CanCollide=true,
+    -- not an accessory, not a character, Transparency < 0.9).
+    -- At 0.75+ transparency the part is barely visible — almost certainly
+    -- an invisible boundary rather than intentional cover.
+    --=================================================================
+
+    if hitPart.Transparency >= RayConfig.TransparencyThreshold then
+        return true
+    end
+
+    --=================================================================
+    -- DEFAULT: TREAT AS SOLID WALL
+    -- MeshParts, UnionOperations, thin parts, semi-transparent geometry
+    -- (0.1–0.74) are all treated as legitimate obstacles. If the collision
+    -- box is oversized relative to the visual mesh, the multi-ray fallback
+    -- in Section 3 handles it geometrically (offset rays miss the box).
+    --=================================================================
+
+    return false
+end
+
+--=============================================================================
+-- SECTION 3: MULTI-RAY LINE-OF-SIGHT ENGINE
+-- Primary ray to part center + fallback offset rays for edge cases.
+-- If ANY ray has clear LoS, the part is considered visible.
+--=============================================================================
+
+-- Pierce raycast: punches through filtered objects up to maxDepth.
+-- Uses the global LoS pool (ignorePool/ignorePoolSize) so pierced objects
+-- accumulate across multiple calls for the same player's limbs.
+local function castPierceRay(origin, targetPos, maxDepth)
+    local direction = targetPos - origin
+
+    for _ = 1, maxDepth do
+        losRayParams.FilterDescendantsInstances = ignorePool
+        local hit = workspace:Raycast(origin, direction, losRayParams)
+
+        if not hit then
+            return true  -- Clear line of sight, nothing in the way
+        end
+
+        if shouldPierceHit(hit.Instance) then
+            poolAdd(hit.Instance)
+            -- Advance origin past the hit surface (0.01 stud epsilon to avoid re-hit)
+            local hitPos = hit.Position + hit.Normal * 0.01
+            direction = targetPos - hitPos
+            origin = hitPos
+        else
+            return false  -- Solid obstacle, blocked
+        end
+    end
+
+    return false  -- Exceeded pierce depth, assume blocked
+end
+
+-- Full visibility check: primary ray + fallback offset rays + caching
+local function checkVisibility(origin, targetPart)
+    local cached, wasHit = visCacheGet(targetPart)
+    if wasHit then return cached end
+
+    local targetPos = targetPart.Position
+
+    -- Primary ray: camera → part center
+    if castPierceRay(origin, targetPos, RayConfig.MaxPierceDepth) then
+        visCacheSet(targetPart, true)
+        return true
+    end
+
+    -- Primary blocked — try offset rays to part edges.
+    -- If center is blocked by edge geometry but sides are clear, these catch it.
+    -- Offsets use the part's local axes so they make geometric sense regardless
+    -- of part orientation.
+    local partSize = targetPart.Size
+    local cframe   = targetPart.CFrame
+
+    local offsets = {
+        cframe.RightVector * (partSize.X * RayConfig.PartSizeOffset),
+        cframe.UpVector    * (partSize.Y * RayConfig.PartSizeOffset),
+    }
+
+    for i = 1, RayConfig.FallbackRayCount do
+        local offset = offsets[i]
+        if offset then
+            if castPierceRay(origin, targetPos + offset, RayConfig.MaxPierceDepth) then
+                visCacheSet(targetPart, true)
+                return true
+            end
+        end
+    end
+
+    visCacheSet(targetPart, false)
+    return false
+end
+
+--=============================================================================
+-- SECTION 4: CHARACTER & TEAM UTILITIES
+--=============================================================================
+
+local function getUIContainer()
+    local success, _ = pcall(function() return CoreGui.Name end)
+    if success and CoreGui then return CoreGui end
+    return player:WaitForChild("PlayerGui")
+end
+
+local guiParent = getUIContainer()
+
+local function getCharacter(plr)
+    if plr.Character then return plr.Character end
+
+    local charsFolder = workspace:FindFirstChild("Characters")
+    if charsFolder then
+        for _, teamFolder in ipairs(charsFolder:GetChildren()) do
+            local char = teamFolder:FindFirstChild(plr.Name)
+            if char then return char end
+        end
+    end
+    return nil
+end
+
+local function getPlayerTeamFolder(plr)
+    local char = getCharacter(plr)
+    if char and char.Parent then
+        return char.Parent.Name
+    end
+    return nil
+end
+
+local function isSameTeam(otherPlayer)
+    -- Refresh team cache every 0.5s to avoid stale lookups
+    local now = tick()
+    if now - teamCacheTick > 0.5 then
+        table.clear(teamCache)
+        teamCacheTick = now
+    end
+
+    local myTeam = teamCache[player]
+    if not myTeam then
+        myTeam = getPlayerTeamFolder(player) or ""
+        teamCache[player] = myTeam
+    end
+
+    local theirTeam = teamCache[otherPlayer]
+    if not theirTeam then
+        theirTeam = getPlayerTeamFolder(otherPlayer) or ""
+        teamCache[otherPlayer] = theirTeam
+    end
+
+    if myTeam ~= "" and theirTeam ~= "" and myTeam == theirTeam then return true end
+    if player.Team and otherPlayer.Team and player.Team == otherPlayer.Team then return true end
+    return false
+end
+
+-- Checks if a player is actually alive and a valid target
+local function isAlive(plr, char)
+    if not char then char = getCharacter(plr) end
+    if not char then return false end
+    
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    if humanoid.Health <= 0 then return false end
+    
+    -- Sometimes players respawn but their old character model sticks around briefly
+    if humanoid:GetState() == Enum.HumanoidStateType.Dead then return false end
+    
+    return true
+end
+
+-- Main target validation
+local function isValidTarget(otherPlayer, char)
+    if not isAlive(otherPlayer, char) then return false end
+    if Config.TeamCheck and isSameTeam(otherPlayer) then return false end
+    return true
+end
+
+--=============================================================================
+-- SECTION 5: VISUALIZATION MANAGEMENT
+--=============================================================================
+
+local function clearVisualization(character)
+    for _, obj in ipairs(character:GetDescendants()) do
+        if obj.Name == VIZ_TAG and obj:IsA("Highlight") then
+            obj:Destroy()
+        end
+    end
+end
+
+-- Target part name list: cached and only rebuilt when body part toggles change.
+-- Avoids rebuilding a table of 15+ strings every applyVisualization call.
+local cachedTargetNames = nil
+local cachedTargetMap   = nil
+
+local function getTargetNames()
+    if cachedTargetNames then return cachedTargetNames, cachedTargetMap end
+
+    cachedTargetNames = {}
+    cachedTargetMap   = {}
+
+    local function addParts(list)
+        for _, n in ipairs(list) do
+            cachedTargetNames[#cachedTargetNames + 1] = n
+            cachedTargetMap[n] = true
+        end
+    end
+
+    if Config.ShowHead  then addParts(Config.HeadParts)  end
+    if Config.ShowTorso then addParts(Config.TorsoParts) end
+    if Config.ShowArms  then addParts(Config.ArmParts)   end
+    if Config.ShowLegs  then addParts(Config.LegParts)   end
+
+    return cachedTargetNames, cachedTargetMap
+end
+
+local function invalidateTargetNameCache()
+    cachedTargetNames = nil
+    cachedTargetMap   = nil
+end
+
+local function applyVisualization(otherPlayer, character)
+    clearVisualization(character)
+    local activeAdornments = {}
+
+    if not Config.Enabled then return activeAdornments end
+    if not isValidTarget(otherPlayer, character) then return activeAdornments end
+
+    local targetNames, targetNamesMap = getTargetNames()
+
+    for _, partName in ipairs(targetNames) do
+        local part = character:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            local box = Instance.new("Highlight")
+            box.Name                = VIZ_TAG
+            box.Adornee             = part
+            box.FillColor           = Config.ColorVisible
+            box.OutlineColor        = Config.ColorVisible
+            box.FillTransparency    = Config.Transparency
+            box.OutlineTransparency = Config.OutlineTransp
+            box.DepthMode           = Config.ShowThroughWalls
+                and Enum.HighlightDepthMode.AlwaysOnTop
+                or Enum.HighlightDepthMode.Occluded
+            box.Parent              = part
+            activeAdornments[#activeAdornments + 1] = box
+        end
+    end
+
+    -- Accessory occlusion fix: when NOT using AlwaysOnTop, accessories would
+    -- render on top of body highlights creating visual glitches. Adding Occluded
+    -- highlights to accessory parts fixes the layering.
+    if not Config.ShowThroughWalls then
+        for _, obj in ipairs(character:GetDescendants()) do
+            if obj:IsA("BasePart") and not targetNamesMap[obj.Name] then
+                local box = Instance.new("Highlight")
+                box.Name                = VIZ_TAG
+                box.Adornee             = obj
+                box.FillColor           = Config.ColorVisible
+                box.OutlineColor        = Config.ColorVisible
+                box.FillTransparency    = Config.Transparency
+                box.OutlineTransparency = Config.OutlineTransp
+                box.DepthMode           = Enum.HighlightDepthMode.Occluded
+                box.Parent              = obj
+                activeAdornments[#activeAdornments + 1] = box
+            end
+        end
+    end
+
+    return activeAdornments
+end
+
+local function wipeAllVisualizations()
+    for _, state in pairs(trackedState) do
+        if state.character then clearVisualization(state.character) end
+    end
+    trackedState = {}
+    trackedPlayerCount = 0
+    visCacheFlush()
+end
+
+--=============================================================================
+-- SECTION 6: MAIN UPDATE LOOPS
+--=============================================================================
+
+-- State tracking: detect new/changed characters, apply highlight instances
+task.spawn(function()
+    while task.wait(0.5) do
+        if not Config.Enabled then continue end
+
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p == player then continue end
+
+            local char = getCharacter(p)
+            local currentTeam = char and char.Parent and char.Parent.Name or nil
+
+            if char then
+                local state = trackedState[p]
+                local isTargetValid = isValidTarget(p, char)
+
+                if not state or state.character ~= char or state.teamFolder ~= currentTeam or state.valid ~= isTargetValid then
+                    if not state then trackedPlayerCount += 1 end
+                    local adornments = applyVisualization(p, char)
+                    trackedState[p] = {
+                        character  = char,
+                        teamFolder = currentTeam,
+                        adornments = adornments,
+                        valid      = isTargetValid,
+                    }
+                end
+            else
+                if trackedState[p] then trackedPlayerCount -= 1 end
+                trackedState[p] = nil
+            end
+        end
+    end
+end)
+
+-- LoS color update: smart pierce raycasting with caching, runs every Heartbeat
+RunService.Heartbeat:Connect(function()
+    if not Config.Enabled or not Config.DynamicColor then return end
+
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+    local origin   = camera.CFrame.Position
+    local localChar = player.Character
+
+    -- Prevent unbounded cache growth during long sessions
+    if visCacheCount > RayConfig.VisCacheMaxSize then
+        visCacheFlush()
+    end
+
+    for p, state in pairs(trackedState) do
+        if not p.Parent then continue end
+        if not state.character or not state.adornments then continue end
+        local adornments = state.adornments
+        if #adornments == 0 then continue end
+
+        local targetChar = state.character
+
+        -- Distance culling
+        local targetCore = targetChar:FindFirstChild("HumanoidRootPart") or targetChar.PrimaryPart
+        if not targetCore then continue end
+        if (targetCore.Position - origin).Magnitude > Config.RenderDistance then continue end
+
+        -- Prepare pierce pool for this player.
+        -- Pierced objects accumulate across limbs (if the ray pierced object X
+        -- checking the head, it stays filtered for the torso check too).
+        poolClear()
+        if localChar then poolAdd(localChar) end
+        poolAdd(targetChar)
+
+        for _, box in ipairs(adornments) do
+            local targetPart = box.Adornee
+            if not targetPart or not targetPart.Parent then continue end
+
+            local isVisible  = checkVisibility(origin, targetPart)
+            local targetColor = isVisible and Config.ColorVisible or Config.ColorHidden
+
+            -- Only write property if changed (avoids internal Roblox property dirtying)
+            if box.FillColor ~= targetColor then
+                box.FillColor    = targetColor
+                box.OutlineColor = targetColor
+            end
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    if trackedState[p] then trackedPlayerCount -= 1 end
+    trackedState[p] = nil
+end)
+
+--=============================================================================
+-- SECTION 7: TRIGGER BOT ENGINE
+-- Same smart pierce filter as LoS, dedicated ray pool to avoid conflicts.
+--=============================================================================
+
+local lastMouseMoveTime = 0
+local lastShotTime      = 0
+local isRmbHeld         = false
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isRmbHeld = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isRmbHeld = false
+    end
+end)
+
+UserInputService.WindowFocusReleased:Connect(function()
+    isRmbHeld = false
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        lastMouseMoveTime = tick()
+    end
+end)
+
+-- Pierce raycast for trigger bot.
+-- CRITICAL: Only pierce through shouldPierceHit-approved objects.
+-- Character detection uses direct parent Humanoid check, NOT FindFirstAncestorOfClass
+-- (which matches map Model folders and causes wall-piercing).
+local function triggerPierceRay(unitRayOrigin, unitRayDir, maxRange)
+    triggerPoolClear()
+    if player.Character then triggerPoolAdd(player.Character) end
+
+    local origin    = unitRayOrigin
+    local direction = unitRayDir * maxRange
+
+    for _ = 1, RayConfig.TriggerMaxPierce do
+        triggerRayParams.FilterDescendantsInstances = triggerIgnorePool
+        local hit = workspace:Raycast(origin, direction, triggerRayParams)
+
+        if not hit then return nil end
+
+        local hitPart = hit.Instance
+        local parent = hitPart.Parent
+
+        -- Check if we directly hit a character's body part.
+        -- A character Model has a Humanoid as a direct child.
+        -- We check the PARENT of the hit part, not FindFirstAncestorOfClass,
+        -- because map geometry is often nested in Models too.
+        if parent and parent:IsA("Model") and parent:FindFirstChildOfClass("Humanoid") then
+            local targetPlayer = Players:GetPlayerFromCharacter(parent)
+            if targetPlayer and targetPlayer ~= player and isValidTarget(targetPlayer, parent) then
+                return targetPlayer
+            end
+            -- Same-team, dead, or NPC — pierce past this character
+            triggerPoolAdd(parent)
+        elseif parent and (parent:IsA("Accessory") or parent:IsA("Tool")) then
+            -- Hit an accessory/tool handle — check if its grandparent is a target character
+            local grandparent = parent.Parent
+            if grandparent and grandparent:IsA("Model") and grandparent:FindFirstChildOfClass("Humanoid") then
+                local targetPlayer = Players:GetPlayerFromCharacter(grandparent)
+                if targetPlayer and targetPlayer ~= player and isValidTarget(targetPlayer, grandparent) then
+                    return targetPlayer
+                end
+                triggerPoolAdd(grandparent)
+            else
+                -- Orphaned accessory/tool — pierce it
+                triggerPoolAdd(hitPart)
+            end
+        elseif shouldPierceHit(hitPart) then
+            -- Non-character filtered object (invisible boundary, effect, etc.)
+            triggerPoolAdd(hitPart)
+        else
+            -- Solid wall. Stop here.
+            return nil
+        end
+
+        -- Advance past hit point
+        local hitPos  = hit.Position + hit.Normal * 0.01
+        local remaining = maxRange - (hitPos - unitRayOrigin).Magnitude
+        if remaining < 1 then return nil end
+        direction = unitRayDir * remaining
+        origin    = hitPos
+    end
+
+    return nil
+end
+
+RunService.RenderStepped:Connect(function()
+    if not Config.TriggerBot then return end
+
+    -- 1. Activation mode gating (Fastest check first)
+    if Config.TriggerMode == 2 then
+        if not isRmbHeld then return end
+    elseif Config.TriggerMode == 3 then
+        if tick() - lastMouseMoveTime > 0.15 then return end
+    end
+
+    -- 2. Fire Rate Check (Placed AFTER input checks so input gating is immediate)
+    local now = tick()
+    if now - lastShotTime < RayConfig.TriggerFireDelay then return end
+
+    local mouse   = player:GetMouse()
+    local unitRay = mouse.UnitRay
+
+    -- 3. Raycast & Target Validation
+    local targetPlayer = triggerPierceRay(unitRay.Origin, unitRay.Direction, 1000)
+    if not targetPlayer then return end
+
+    lastShotTime = now
+
+    -- 4. Execution (Removed task.spawn wrapper for direct inputs to kill the frame latency)
+    if mouse1press then
+        mouse1press()
+        -- The release still needs to be deferred so it doesn't happen in the exact same frame/tick
+        task.delay(0.01, function()
+            if mouse1release then mouse1release() end
+        end)
+    elseif mouse1click then
+        mouse1click()
+    else
+        -- VirtualInputManager must be spawned/delayed to not block RenderStepped
+        task.spawn(function()
+            local vim = game:GetService("VirtualInputManager")
+            vim:SendMouseButtonEvent(mouse.X, mouse.Y, 0, true, game, 1)
+            task.wait(0.01)
+            vim:SendMouseButtonEvent(mouse.X, mouse.Y, 0, false, game, 1)
+        end)
+    end
+end)
+
+--=============================================================================
+-- SECTION 8: GUI
+--=============================================================================
+
+local existingGui = guiParent:FindFirstChild("HitboxVisualizerGUI")
+if existingGui then existingGui:Destroy() end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name            = "HitboxVisualizerGUI"
+ScreenGui.ResetOnSpawn    = false
+ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent          = guiParent
+
+local Panel = Instance.new("Frame")
+Panel.Name              = "Panel"
+Panel.Size              = UDim2.new(0, 280, 0, 450)
+Panel.Position          = UDim2.new(0, 20, 0.5, -225)
+Panel.BackgroundColor3  = Color3.fromRGB(10, 10, 18)
+Panel.BorderSizePixel   = 0
+Panel.ClipsDescendants  = true
+Panel.Active            = true
+Panel.Parent            = ScreenGui
+
+local PanelCorner = Instance.new("UICorner")
+PanelCorner.CornerRadius = UDim.new(0, 14)
+PanelCorner.Parent = Panel
+
+local PanelGradient = Instance.new("UIGradient")
+PanelGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0,   Color3.fromRGB(16, 16, 32)),
+    ColorSequenceKeypoint.new(1,   Color3.fromRGB(8,  8,  16)),
+})
+PanelGradient.Rotation = 135
+PanelGradient.Parent = Panel
+
+local PanelStroke = Instance.new("UIStroke")
+PanelStroke.Thickness = 1.5
+PanelStroke.Color = Color3.fromRGB(255, 255, 255)
+PanelStroke.Parent = Panel
+
+local BorderGrad = Instance.new("UIGradient")
+BorderGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0,   Color3.fromRGB(100, 80, 255)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(50, 150, 255)),
+    ColorSequenceKeypoint.new(1,   Color3.fromRGB(80,  80, 200)),
+})
+BorderGrad.Rotation = 135
+BorderGrad.Parent = PanelStroke
+
+-- Dragging
+local dragging, dragStart, startPos
+Panel.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging  = true
+        dragStart = input.Position
+        startPos  = Panel.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        Panel.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+-- Header
+local Header = Instance.new("Frame")
+Header.Size             = UDim2.new(1, 0, 0, 52)
+Header.BackgroundColor3 = Color3.fromRGB(18, 18, 35)
+Header.BorderSizePixel  = 0
+Header.Parent           = Panel
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 14)
+HeaderCorner.Parent = Header
+
+local HeaderBottomFix = Instance.new("Frame")
+HeaderBottomFix.Size = UDim2.new(1, 0, 0, 10)
+HeaderBottomFix.Position = UDim2.new(0, 0, 1, -10)
+HeaderBottomFix.BackgroundColor3 = Color3.fromRGB(18, 18, 35)
+HeaderBottomFix.BorderSizePixel = 0
+HeaderBottomFix.Parent = Header
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size              = UDim2.new(1, -16, 1, 0)
+TitleLabel.Position          = UDim2.new(0, 16, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text              = "⬡  CHAMS"
+TitleLabel.Font              = Enum.Font.GothamBold
+TitleLabel.TextSize          = 17
+TitleLabel.TextColor3        = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextXAlignment    = Enum.TextXAlignment.Left
+TitleLabel.Parent            = Header
+
+local SubLabel = Instance.new("TextLabel")
+SubLabel.Size               = UDim2.new(1, -16, 0, 14)
+SubLabel.Position           = UDim2.new(0, 16, 0, 32)
+SubLabel.BackgroundTransparency = 1
+SubLabel.Text               = "VISUALIZER  ·  v5.0"
+SubLabel.Font               = Enum.Font.Gotham
+SubLabel.TextSize           = 10
+SubLabel.TextColor3         = Color3.fromRGB(100, 120, 200)
+SubLabel.TextXAlignment     = Enum.TextXAlignment.Left
+SubLabel.Parent             = Header
+
+local AccentLine = Instance.new("Frame")
+AccentLine.Size             = UDim2.new(1, 0, 0, 2)
+AccentLine.Position         = UDim2.new(0, 0, 0, 51)
+AccentLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+AccentLine.BorderSizePixel  = 0
+AccentLine.Parent           = Panel
+
+local AccentGrad = Instance.new("UIGradient")
+AccentGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0,   Color3.fromRGB(100,  80, 255)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB( 60, 180, 255)),
+    ColorSequenceKeypoint.new(1,   Color3.fromRGB( 80,  80, 200)),
+})
+AccentGrad.Parent = AccentLine
+
+-- GUI Helper Functions
+local function makeLabel(parent, text, yOffset)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(0, 120, 0, 20)
+    lbl.Position           = UDim2.new(0, 16, 0, yOffset)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = text
+    lbl.Font               = Enum.Font.Gotham
+    lbl.TextSize           = 13
+    lbl.TextColor3         = Color3.fromRGB(200, 205, 230)
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.Parent             = parent
+end
+
+local function makeToggle(parent, yOffset, initialState, onToggle)
+    local Track = Instance.new("Frame")
+    Track.Size             = UDim2.new(0, 44, 0, 22)
+    Track.Position         = UDim2.new(1, -60, 0, yOffset)
+    Track.BackgroundColor3 = initialState and Color3.fromRGB(60, 120, 255) or Color3.fromRGB(35, 35, 55)
+    Track.BorderSizePixel  = 0
+    Track.Parent           = parent
+
+    local TC = Instance.new("UICorner")
+    TC.CornerRadius = UDim.new(1, 0)
+    TC.Parent = Track
+
+    local Knob = Instance.new("Frame")
+    Knob.Size             = UDim2.new(0, 16, 0, 16)
+    Knob.Position         = initialState and UDim2.new(0, 25, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+    Knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Knob.BorderSizePixel  = 0
+    Knob.Parent           = Track
+
+    local KC = Instance.new("UICorner")
+    KC.CornerRadius = UDim.new(1, 0)
+    KC.Parent = Knob
+
+    local state = initialState
+    local Button = Instance.new("TextButton")
+    Button.Size               = UDim2.new(1, 0, 1, 0)
+    Button.BackgroundTransparency = 1
+    Button.Text               = ""
+    Button.Parent             = Track
+
+    Button.MouseButton1Click:Connect(function()
+        state = not state
+        local tweenInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quad)
+        TweenService:Create(Track, tweenInfo, {
+            BackgroundColor3 = state and Color3.fromRGB(60, 120, 255) or Color3.fromRGB(35, 35, 55)
+        }):Play()
+        TweenService:Create(Knob, tweenInfo, {
+            Position = state and UDim2.new(0, 25, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+        }):Play()
+        onToggle(state)
+    end)
+end
+
+local function makeDivider(parent, yOffset)
+    local d = Instance.new("Frame")
+    d.Size             = UDim2.new(1, -32, 0, 1)
+    d.Position         = UDim2.new(0, 16, 0, yOffset)
+    d.BackgroundColor3 = Color3.fromRGB(30, 30, 55)
+    d.BorderSizePixel  = 0
+    d.Parent           = parent
+end
+
+local function makeSection(parent, text, yOffset)
+    local s = Instance.new("TextLabel")
+    s.Size               = UDim2.new(1, -32, 0, 14)
+    s.Position           = UDim2.new(0, 16, 0, yOffset)
+    s.BackgroundTransparency = 1
+    s.Text               = text
+    s.Font               = Enum.Font.GothamBold
+    s.TextSize           = 10
+    s.TextColor3         = Color3.fromRGB(80, 100, 200)
+    s.TextXAlignment     = Enum.TextXAlignment.Left
+    s.Parent             = parent
+end
+
+local function makeCycle(parent, text, yOffset, options, defaultIndex, onCycle)
+    makeLabel(parent, text, yOffset)
+
+    local Btn = Instance.new("TextButton")
+    Btn.Size             = UDim2.new(0, 80, 0, 22)
+    Btn.Position         = UDim2.new(1, -96, 0, yOffset - 1)
+    Btn.BackgroundColor3 = Color3.fromRGB(35, 35, 55)
+    Btn.BorderSizePixel  = 0
+    Btn.Text             = options[defaultIndex]
+    Btn.Font             = Enum.Font.GothamBold
+    Btn.TextSize         = 10
+    Btn.TextColor3       = Color3.fromRGB(200, 205, 230)
+    Btn.Parent           = parent
+
+    local UIC = Instance.new("UICorner")
+    UIC.CornerRadius = UDim.new(0, 6)
+    UIC.Parent = Btn
+
+    local index = defaultIndex
+    Btn.MouseButton1Click:Connect(function()
+        index = index + 1
+        if index > #options then index = 1 end
+        Btn.Text = options[index]
+        onCycle(index)
+    end)
+end
+
+-- Build Controls
+local y = 65
+makeSection(Panel, "MASTER", y)
+y = y + 18
+
+makeLabel(Panel, "Enable Visualizer", y)
+makeToggle(Panel, y - 1, Config.Enabled, function(v)
+    Config.Enabled = v
+    if not v then wipeAllVisualizations() end
+    trackedState = {}
+    trackedPlayerCount = 0
+end)
+y = y + 30
+
+makeLabel(Panel, "Through Walls (ESP)", y)
+makeToggle(Panel, y - 1, Config.ShowThroughWalls, function(v)
+    Config.ShowThroughWalls = v
+    wipeAllVisualizations()
+end)
+y = y + 30
+
+makeLabel(Panel, "Dynamic LoS Color", y)
+makeToggle(Panel, y - 1, Config.DynamicColor, function(v)
+    Config.DynamicColor = v
+    visCacheFlush()
+    if not v then
+        for _, state in pairs(trackedState) do
+            if state.adornments then
+                for _, box in ipairs(state.adornments) do
+                    box.FillColor    = Config.ColorVisible
+                    box.OutlineColor = Config.ColorVisible
+                end
+            end
+        end
+    end
+end)
+y = y + 30
+
+makeLabel(Panel, "Team Check", y)
+makeToggle(Panel, y - 1, Config.TeamCheck, function(v)
+    Config.TeamCheck = v
+    wipeAllVisualizations()
+end)
+y = y + 30
+
+makeLabel(Panel, "Trigger Bot", y)
+makeToggle(Panel, y - 1, Config.TriggerBot, function(v)
+    Config.TriggerBot = v
+end)
+y = y + 30
+
+makeCycle(Panel, "Activation", y, {"ALWAYS ON", "HOLD RMB", "TRACKING"}, Config.TriggerMode, function(idx)
+    Config.TriggerMode = idx
+end)
+y = y + 30
+
+makeDivider(Panel, y)
+y = y + 10
+
+makeSection(Panel, "BODY PARTS", y)
+y = y + 18
+
+makeLabel(Panel, "Head", y)
+makeToggle(Panel, y - 1, Config.ShowHead, function(v)
+    Config.ShowHead = v
+    invalidateTargetNameCache()
+    wipeAllVisualizations()
+end)
+y = y + 30
+
+makeLabel(Panel, "Torso", y)
+makeToggle(Panel, y - 1, Config.ShowTorso, function(v)
+    Config.ShowTorso = v
+    invalidateTargetNameCache()
+    wipeAllVisualizations()
+end)
+y = y + 30
+
+makeLabel(Panel, "Arms", y)
+makeToggle(Panel, y - 1, Config.ShowArms, function(v)
+    Config.ShowArms = v
+    invalidateTargetNameCache()
+    wipeAllVisualizations()
+end)
+y = y + 30
+
+makeLabel(Panel, "Legs", y)
+makeToggle(Panel, y - 1, Config.ShowLegs, function(v)
+    Config.ShowLegs = v
+    invalidateTargetNameCache()
+    wipeAllVisualizations()
+end)
+y = y + 36
+
+makeDivider(Panel, y - 6)
+
+-- Status Bar (uses incremental counter instead of per-frame loop)
+local StatusBar = Instance.new("Frame")
+StatusBar.Size             = UDim2.new(1, -32, 0, 28)
+StatusBar.Position         = UDim2.new(0, 16, 0, y)
+StatusBar.BackgroundColor3 = Color3.fromRGB(18, 18, 35)
+StatusBar.BorderSizePixel  = 0
+StatusBar.Parent           = Panel
+
+local SBC = Instance.new("UICorner")
+SBC.CornerRadius = UDim.new(0, 8)
+SBC.Parent = StatusBar
+
+local Dot = Instance.new("Frame")
+Dot.Size             = UDim2.new(0, 8, 0, 8)
+Dot.Position         = UDim2.new(0, 10, 0.5, -4)
+Dot.BackgroundColor3 = Color3.fromRGB(60, 220, 100)
+Dot.BorderSizePixel  = 0
+Dot.Parent           = StatusBar
+
+local DC = Instance.new("UICorner")
+DC.CornerRadius = UDim.new(1, 0)
+DC.Parent = Dot
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size               = UDim2.new(1, -30, 1, 0)
+StatusLabel.Position           = UDim2.new(0, 26, 0, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Font               = Enum.Font.Gotham
+StatusLabel.TextSize           = 11
+StatusLabel.TextColor3         = Color3.fromRGB(160, 175, 210)
+StatusLabel.TextXAlignment     = Enum.TextXAlignment.Left
+StatusLabel.Parent             = StatusBar
+
+RunService.Heartbeat:Connect(function()
+    local c = trackedPlayerCount
+    StatusLabel.Text = string.format("Tracking %d player%s", c, c ~= 1 and "s" or "")
+    Dot.BackgroundColor3 = Config.Enabled
+        and Color3.fromRGB(60, 220, 100)
+        or Color3.fromRGB(200, 60, 60)
+end)
+
+-- Minimize button
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size               = UDim2.new(0, 24, 0, 24)
+MinBtn.Position           = UDim2.new(1, -36, 0, 14)
+MinBtn.BackgroundColor3   = Color3.fromRGB(30, 30, 55)
+MinBtn.BorderSizePixel    = 0
+MinBtn.Text               = "—"
+MinBtn.Font               = Enum.Font.GothamBold
+MinBtn.TextSize           = 12
+MinBtn.TextColor3         = Color3.fromRGB(150, 160, 210)
+MinBtn.ZIndex             = 5
+MinBtn.Parent             = Panel
+
+local MBC = Instance.new("UICorner")
+MBC.CornerRadius = UDim.new(0, 6)
+MBC.Parent = MinBtn
+
+local minimized = false
+local FULL_SIZE = UDim2.new(0, 280, 0, 450)
+local MINI_SIZE = UDim2.new(0, 280, 0, 52)
+
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    TweenService:Create(Panel, TweenInfo.new(0.25, Enum.EasingStyle.Quart), {
+        Size = minimized and MINI_SIZE or FULL_SIZE
+    }):Play()
+    MinBtn.Text = minimized and "+" or "—"
+end)
+
+-- Intro animation
+Panel.Size = UDim2.new(0, 280, 0, 0)
+Panel.BackgroundTransparency = 1
+TweenService:Create(Panel, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    Size = FULL_SIZE,
+    BackgroundTransparency = 0,
+}):Play()
+
+-- F5 toggle GUI visibility
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.F5 then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end)
+
+print("[HitboxViz v5.0] Loaded — Reforged Engine. Press F5 to toggle GUI.")
